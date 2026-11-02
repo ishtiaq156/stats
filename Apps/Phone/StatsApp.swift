@@ -240,13 +240,34 @@ private struct AboutThisMacView: View {
                             Text(error)
                                 .font(.system(size: 13))
                                 .multilineTextAlignment(.center)
-                            Button("Try Again") { store.loadAbout() }
+                            Button("Try Again") { store.loadAbout(force: true) }
                         }
                         .foregroundStyle(.secondary)
                         .padding(.top, 130)
                     } else {
-                        ProgressView("Loading Mac details…")
-                            .padding(.top, 130)
+                        Image(systemName: "desktopcomputer")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.secondary)
+                            .padding(44)
+                            .frame(width: 190, height: 190)
+                        Text("Mac")
+                            .font(.system(size: 22, weight: .bold))
+                            .frame(height: 30)
+                            .padding(.top, 7)
+                        Text("—")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(height: 17)
+                        VStack(spacing: 3) {
+                            aboutRow("Chip", nil)
+                            aboutRow("Memory", nil)
+                            aboutRow("Startup disk", nil)
+                            aboutRow("Serial number", nil)
+                            aboutRow("macOS", nil)
+                        }
+                        .padding(.top, 16)
+                        .accessibilityLabel("Retrieving Mac details")
                     }
                 }
                 .frame(maxWidth: 280)

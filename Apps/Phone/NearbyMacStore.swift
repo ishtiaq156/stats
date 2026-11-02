@@ -42,6 +42,11 @@ private final class BonjourMacNameResolver: NSObject, @preconcurrency NetService
     }
 }
 
+private struct CachedMacAbout: Codable {
+    let fetchedAt: Date
+    let info: MacAboutInfo
+}
+
 @MainActor
 final class NearbyMacStore: ObservableObject {
     struct Device: Identifiable {
@@ -69,6 +74,10 @@ final class NearbyMacStore: ObservableObject {
     @Published private(set) var aboutInfo: MacAboutInfo?
     @Published private(set) var aboutError: String?
     @Published private(set) var refreshIntervalSeconds: Int
+    private var aboutFetchedAt: Date?
+    private var aboutLastAttemptAt: Date?
+    private static let aboutCacheLifetime: TimeInterval = 60 * 60
+    private static let aboutRetryInterval: TimeInterval = 60
 
     private var browser: NWBrowser?
     private var browserGeneration = UUID()
@@ -145,6 +154,7 @@ final class NearbyMacStore: ObservableObject {
         selectedDisplayName = defaults.string(forKey: Self.lastMacDisplayNameKey) ?? name
         selectedKey = credential.key
         selectedPhoneID = credential.phoneID
+        restoreCachedAbout(for: credential.phoneID)
         sessionRequested = defaults.object(forKey: Self.resumeDashboardKey) as? Bool ?? true
         status = "Looking for \(selectedDisplayName ?? name)"
         if let host = defaults.string(forKey: Self.manualHostKey),
@@ -173,7 +183,9 @@ final class NearbyMacStore: ObservableObject {
         selectionGeneration = UUID()
         cancelSnapshotRequest()
         cancelHistoryRequest()
-        if activeAboutConnection != nil { aboutError = "Loading was interrupted. Try again." }
+        if activeAboutConnection != nil, aboutInfo == nil {
+            aboutError = "Loading was interrupted. Try again."
+        }
         cancelAboutRequest()
         historyLoaded = false
     }
@@ -291,11 +303,14 @@ final class NearbyMacStore: ObservableObject {
                 self.pairer = nil
                 switch result {
                 case .success(let enrollment):
+                    let previousPhoneID = PairingStore.load(for: device.name)
+                        .flatMap { PairingStore.decode($0)?.phoneID }
                     let stored = PairingStore.encode(key: enrollment.credential, phoneID: enrollment.phoneID)
                     guard PairingStore.save(stored, for: device.name) else {
                         completion(.failure(PasscodePairer.PairingError.credentialSaveFailed))
                         return
                     }
+                    if let previousPhoneID { self.removeCachedAbout(for: previousPhoneID) }
                     self.selectedName = device.name
                     self.selectedDisplayName = device.displayName
                     self.sessionRequested = true
@@ -307,6 +322,11 @@ final class NearbyMacStore: ObservableObject {
                     self.selectedEndpoint = device.endpoint
                     self.selectedKey = enrollment.credential
                     self.selectedPhoneID = enrollment.phoneID
+                    self.aboutInfo = nil
+                    self.aboutFetchedAt = nil
+                    self.aboutLastAttemptAt = nil
+                    self.aboutError = nil
+                    self.cancelAboutRequest()
                     self.snapshot = nil
                     self.history = []
                     self.historyLoaded = false
@@ -356,8 +376,7 @@ final class NearbyMacStore: ObservableObject {
         cancelSnapshotRequest()
         cancelHistoryRequest()
         cancelAboutRequest()
-        aboutInfo = nil
-        aboutError = nil
+        restoreCachedAbout(for: credential.phoneID)
         selectedEndpoint = device.endpoint
         selectedKey = credential.key
         selectedPhoneID = credential.phoneID
@@ -394,6 +413,7 @@ final class NearbyMacStore: ObservableObject {
 
     func forget() {
         if let selectedName { PairingStore.delete(for: selectedName) }
+        if let selectedPhoneID { removeCachedAbout(for: selectedPhoneID) }
         selectedName = nil
         selectedDisplayName = nil
         sessionRequested = false
@@ -404,6 +424,8 @@ final class NearbyMacStore: ObservableObject {
         cancelHistoryRequest()
         cancelAboutRequest()
         aboutInfo = nil
+        aboutFetchedAt = nil
+        aboutLastAttemptAt = nil
         aboutError = nil
         selectedEndpoint = nil
         selectedKey = nil
@@ -530,6 +552,7 @@ final class NearbyMacStore: ObservableObject {
                 self?.inFlight = false
                 self?.activeSnapshotConnection = nil
                 if self?.historyLoaded == false { self?.fetchHistory() }
+                self?.loadAbout()
             }
         }
     }
@@ -567,14 +590,21 @@ final class NearbyMacStore: ObservableObject {
         if history.count > 900 { history.removeFirst(history.count - 900) }
     }
 
-    func loadAbout() {
-        cancelAboutRequest()
-        aboutInfo = nil
-        aboutError = nil
-        guard let endpoint = selectedEndpoint, let key = selectedKey, let phoneID = selectedPhoneID else {
-            aboutError = "This Mac is unavailable."
+    // Also called after the first authenticated snapshot, so the sheet has data before it opens.
+    // Subsequent calls return immediately with the cached details and refresh them only when stale.
+    func loadAbout(force: Bool = false) {
+        guard activeAboutConnection == nil else { return }
+        if !force, let aboutFetchedAt, aboutInfo != nil,
+           Date().timeIntervalSince(aboutFetchedAt) < Self.aboutCacheLifetime { return }
+        if !force, let aboutLastAttemptAt,
+           Date().timeIntervalSince(aboutLastAttemptAt) < Self.aboutRetryInterval { return }
+        guard let endpoint = selectedEndpoint, let key = selectedKey, let phoneID = selectedPhoneID,
+              selectedReachable else {
+            if aboutInfo == nil { aboutError = "This Mac is unavailable." }
             return
         }
+        aboutError = nil
+        aboutLastAttemptAt = .now
         let generation = selectionGeneration
         let connection = NWConnection(to: endpoint, using: .tcp)
         activeAboutConnection = connection
@@ -595,7 +625,7 @@ final class NearbyMacStore: ObservableObject {
                             }
                         }
                     })
-                    self.receiveAboutHeader(on: connection, key: key, generation: generation)
+                    self.receiveAboutHeader(on: connection, key: key, phoneID: phoneID, generation: generation)
                 case .failed:
                     self.finishAbout(connection, error: "Couldn’t reach this Mac.")
                 default: break
@@ -609,7 +639,8 @@ final class NearbyMacStore: ObservableObject {
         }
     }
 
-    private func receiveAboutHeader(on connection: NWConnection, key: Data, generation: UUID) {
+    private func receiveAboutHeader(on connection: NWConnection, key: Data,
+                                    phoneID: UUID, generation: UUID) {
         connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] data, _, _, error in
             Task { @MainActor in
                 guard let self, self.selectionGeneration == generation,
@@ -629,6 +660,8 @@ final class NearbyMacStore: ObservableObject {
                             return
                         }
                         self.aboutInfo = info
+                        self.aboutFetchedAt = .now
+                        self.storeCachedAbout(info, for: phoneID)
                         self.finishAbout(connection, error: nil)
                     }
                 }
@@ -638,13 +671,45 @@ final class NearbyMacStore: ObservableObject {
 
     private func finishAbout(_ connection: NWConnection, error: String?) {
         guard activeAboutConnection === connection else { return }
-        if let error { aboutError = error }
+        if let error, aboutInfo == nil { aboutError = error }
         cancelAboutRequest()
     }
 
     private func cancelAboutRequest() {
         activeAboutConnection?.cancel()
         activeAboutConnection = nil
+    }
+
+    // Cache only within the app's private, non-backed-up Caches directory. A fresh pairing
+    // receives a different phone ID, so it cannot display another pairing's cached details.
+    private func aboutCacheURL(for phoneID: UUID) -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MacAbout", isDirectory: true)
+            .appendingPathComponent(phoneID.uuidString + ".json")
+    }
+
+    private func restoreCachedAbout(for phoneID: UUID) {
+        aboutInfo = nil
+        aboutFetchedAt = nil
+        aboutLastAttemptAt = nil
+        aboutError = nil
+        guard let data = try? Data(contentsOf: aboutCacheURL(for: phoneID)),
+              let cached = try? JSONDecoder().decode(CachedMacAbout.self, from: data) else { return }
+        aboutInfo = cached.info
+        aboutFetchedAt = cached.fetchedAt
+    }
+
+    private func storeCachedAbout(_ info: MacAboutInfo, for phoneID: UUID) {
+        let url = aboutCacheURL(for: phoneID)
+        let cached = CachedMacAbout(fetchedAt: .now, info: info)
+        guard let data = try? JSONEncoder().encode(cached) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    }
+
+    private func removeCachedAbout(for phoneID: UUID) {
+        try? FileManager.default.removeItem(at: aboutCacheURL(for: phoneID))
     }
 
     private func fetchHistory() {

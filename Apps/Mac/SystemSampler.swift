@@ -8,7 +8,13 @@ final class SystemSampler {
     private var previousCPU: (used: UInt64, total: UInt64)?
     private var previousNetwork: (received: UInt64, sent: UInt64, date: Date)?
 
-    static func about() -> MacAboutInfo {
+    // Hardware identity and icon are stable for the lifetime of the companion process.
+    // Keep the expensive system_profiler invocation and PNG rendering to one fetch.
+    private static let cachedAbout = buildAbout()
+
+    static func about() -> MacAboutInfo { cachedAbout }
+
+    private static func buildAbout() -> MacAboutInfo {
         let hardware = systemProfile("SPHardwareDataType")
         let model = hardware["machine_name"] ?? "Mac"
         let version = ProcessInfo.processInfo.operatingSystemVersion
