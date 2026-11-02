@@ -15,6 +15,8 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
     public let networkSentBytesPerSecond: Double?
     public let batteryFraction: Double?
     public let isCharging: Bool?
+    // Optional so existing macOS companions and saved history remain decodable.
+    public let cpuDetails: CPUDetails?
 
     public init(
         machineName: String,
@@ -27,7 +29,8 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         networkReceivedBytesPerSecond: Double? = nil,
         networkSentBytesPerSecond: Double? = nil,
         batteryFraction: Double? = nil,
-        isCharging: Bool? = nil
+        isCharging: Bool? = nil,
+        cpuDetails: CPUDetails? = nil
     ) {
         self.version = Self.protocolVersion
         self.machineName = machineName
@@ -41,6 +44,103 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         self.networkSentBytesPerSecond = networkSentBytesPerSecond
         self.batteryFraction = batteryFraction
         self.isCharging = isCharging
+        self.cpuDetails = cpuDetails
+    }
+
+    /// Exclude momentary process rankings from the history response to keep it compact.
+    public func withoutCPUProcesses() -> MetricSnapshot {
+        MetricSnapshot(machineName: machineName, timestamp: timestamp, cpuFraction: cpuFraction,
+                       memoryUsedBytes: memoryUsedBytes, memoryTotalBytes: memoryTotalBytes,
+                       diskFreeBytes: diskFreeBytes, diskTotalBytes: diskTotalBytes,
+                       networkReceivedBytesPerSecond: networkReceivedBytesPerSecond,
+                       networkSentBytesPerSecond: networkSentBytesPerSecond,
+                       batteryFraction: batteryFraction, isCharging: isCharging,
+                       cpuDetails: cpuDetails?.withoutProcesses())
+    }
+}
+
+public struct CPUProcess: Codable, Sendable, Equatable, Identifiable {
+    public let pid: Int
+    public let name: String
+    /// The process CPU usage as a percent of one logical CPU; may exceed 100%.
+    public let usagePercent: Double
+    public var id: Int { pid }
+
+    public init(pid: Int, name: String, usagePercent: Double) {
+        self.pid = pid
+        self.name = name
+        self.usagePercent = usagePercent
+    }
+}
+
+/// CPU values sampled on the Mac. Fractions range from 0 through 1 unless otherwise noted.
+/// The optional fields support older companion builds and hardware-dependent availability.
+public struct CPUDetails: Codable, Sendable, Equatable {
+    public let userFraction: Double?
+    public let systemFraction: Double?
+    public let idleFraction: Double?
+    public let perCoreFractions: [Double]?
+    /// Core classifications in perCoreFractions order: efficiency, performance, super, or unknown.
+    public let coreTypes: [String]?
+    public let physicalCores: Int?
+    public let logicalCores: Int?
+    public let efficiencyCores: Int?
+    public let performanceCores: Int?
+    public let superCores: Int?
+    /// BSD load averages in 1-, 5- and 15-minute order.
+    public let loadAverages: [Double]?
+    public let uptimeSeconds: TimeInterval?
+    public let temperatureCelsius: Double?
+    public let frequencyMHz: Double?
+    public let efficiencyFrequencyMHz: Double?
+    public let performanceFrequencyMHz: Double?
+    public let superFrequencyMHz: Double?
+    public let topProcesses: [CPUProcess]?
+
+    public init(userFraction: Double? = nil, systemFraction: Double? = nil,
+                idleFraction: Double? = nil, perCoreFractions: [Double]? = nil,
+                coreTypes: [String]? = nil, physicalCores: Int? = nil,
+                logicalCores: Int? = nil, efficiencyCores: Int? = nil,
+                performanceCores: Int? = nil, superCores: Int? = nil,
+                loadAverages: [Double]? = nil,
+                uptimeSeconds: TimeInterval? = nil, temperatureCelsius: Double? = nil,
+                frequencyMHz: Double? = nil,
+                efficiencyFrequencyMHz: Double? = nil,
+                performanceFrequencyMHz: Double? = nil,
+                superFrequencyMHz: Double? = nil,
+                topProcesses: [CPUProcess]? = nil) {
+        self.userFraction = userFraction
+        self.systemFraction = systemFraction
+        self.idleFraction = idleFraction
+        self.perCoreFractions = perCoreFractions
+        self.coreTypes = coreTypes
+        self.physicalCores = physicalCores
+        self.logicalCores = logicalCores
+        self.efficiencyCores = efficiencyCores
+        self.performanceCores = performanceCores
+        self.superCores = superCores
+        self.loadAverages = loadAverages
+        self.uptimeSeconds = uptimeSeconds
+        self.temperatureCelsius = temperatureCelsius
+        self.frequencyMHz = frequencyMHz
+        self.efficiencyFrequencyMHz = efficiencyFrequencyMHz
+        self.performanceFrequencyMHz = performanceFrequencyMHz
+        self.superFrequencyMHz = superFrequencyMHz
+        self.topProcesses = topProcesses
+    }
+
+    public func withoutProcesses() -> CPUDetails {
+        CPUDetails(userFraction: userFraction, systemFraction: systemFraction,
+                   idleFraction: idleFraction, perCoreFractions: perCoreFractions,
+                   coreTypes: coreTypes, physicalCores: physicalCores,
+                   logicalCores: logicalCores, efficiencyCores: efficiencyCores,
+                   performanceCores: performanceCores, superCores: superCores,
+                   loadAverages: loadAverages,
+                   uptimeSeconds: uptimeSeconds, temperatureCelsius: temperatureCelsius,
+                   frequencyMHz: frequencyMHz,
+                   efficiencyFrequencyMHz: efficiencyFrequencyMHz,
+                   performanceFrequencyMHz: performanceFrequencyMHz,
+                   superFrequencyMHz: superFrequencyMHz)
     }
 }
 

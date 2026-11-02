@@ -2,10 +2,28 @@ import ActivityCore
 import AppKit
 import Darwin
 import Foundation
+import IOKit
 import IOKit.ps
 
+@MainActor
 final class SystemSampler {
-    private var previousCPU: (used: UInt64, total: UInt64)?
+    private struct CoreTopology {
+        let physical: Int?
+        let logical: Int?
+        let types: [String]?
+        let efficiency: Int?
+        let performance: Int?
+        let supers: Int?
+    }
+
+    private static let topology = readCoreTopology()
+    private var previousCPUTicks: [UInt32]?
+    private var cachedProcesses: [CPUProcess]?
+    private var processesFetching = false
+    private var lastProcessesFetch: Date = .distantPast
+    private var cachedHardware: CPUHardwareReadings?
+    private var hardwareFetching = false
+    private var lastHardwareFetch: Date = .distantPast
     private var previousNetwork: (received: UInt64, sent: UInt64, date: Date)?
 
     // Hardware identity and icon are stable for the lifetime of the companion process.
@@ -73,7 +91,7 @@ final class SystemSampler {
 
     func sample() -> MetricSnapshot {
         let date = Date()
-        let cpu = cpuUsage()
+        let cpu = cpuUsage(at: date)
         let memory = memoryUsage()
         let disk = diskUsage()
         let network = networkRates(at: date)
@@ -82,7 +100,7 @@ final class SystemSampler {
         return MetricSnapshot(
             machineName: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
             timestamp: date,
-            cpuFraction: cpu,
+            cpuFraction: cpu.usage,
             memoryUsedBytes: memory?.used,
             memoryTotalBytes: memory?.total,
             diskFreeBytes: disk?.free,
@@ -90,25 +108,214 @@ final class SystemSampler {
             networkReceivedBytesPerSecond: network?.received,
             networkSentBytesPerSecond: network?.sent,
             batteryFraction: battery?.fraction,
-            isCharging: battery?.charging
+            isCharging: battery?.charging,
+            cpuDetails: cpu.details
         )
     }
 
-    private func cpuUsage() -> Double? {
-        var info = host_cpu_load_info()
-        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+    private func cpuUsage(at date: Date) -> (usage: Double?, details: CPUDetails) {
+        refreshProcessesIfNeeded(at: date)
+        refreshHardwareIfNeeded(at: date)
+        var cpuCount: natural_t = 0
+        var infoCount: mach_msg_type_number_t = 0
+        var cpuInfo: processor_info_array_t?
+        var busy: Double?
+        var user: Double?
+        var system: Double?
+        var idle: Double?
+        var perCore: [Double]?
+
+        let status = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
+                                         &cpuCount, &cpuInfo, &infoCount)
+        if status == KERN_SUCCESS, let cpuInfo {
+            defer {
+                vm_deallocate(mach_task_self_, vm_address_t(bitPattern: cpuInfo),
+                              vm_size_t(Int(infoCount) * MemoryLayout<integer_t>.stride))
+            }
+            let current = (0..<Int(infoCount)).map { UInt32(bitPattern: cpuInfo[$0]) }
+            let coreCount = min(Int(cpuCount), current.count / Int(CPU_STATE_MAX))
+            if let previous = previousCPUTicks, previous.count == current.count, coreCount > 0 {
+                var userTicks: UInt64 = 0
+                var systemTicks: UInt64 = 0
+                var idleTicks: UInt64 = 0
+                var niceTicks: UInt64 = 0
+                var individual: [Double] = []
+                for i in 0..<coreCount {
+                    let offset = i * Int(CPU_STATE_MAX)
+                    let u = UInt64(current[offset + Int(CPU_STATE_USER)] &- previous[offset + Int(CPU_STATE_USER)])
+                    let s = UInt64(current[offset + Int(CPU_STATE_SYSTEM)] &- previous[offset + Int(CPU_STATE_SYSTEM)])
+                    let n = UInt64(current[offset + Int(CPU_STATE_NICE)] &- previous[offset + Int(CPU_STATE_NICE)])
+                    let d = UInt64(current[offset + Int(CPU_STATE_IDLE)] &- previous[offset + Int(CPU_STATE_IDLE)])
+                    let total = u + s + n + d
+                    individual.append(total > 0 ? Double(u + s + n) / Double(total) : 0)
+                    userTicks += u
+                    systemTicks += s
+                    niceTicks += n
+                    idleTicks += d
+                }
+                let total = userTicks + systemTicks + niceTicks + idleTicks
+                if total > 0 {
+                    let ticks = Double(total)
+                    user = Double(userTicks + niceTicks) / ticks
+                    system = Double(systemTicks) / ticks
+                    idle = Double(idleTicks) / ticks
+                    busy = (user ?? 0) + (system ?? 0)
+                    perCore = individual
+                }
+            }
+            previousCPUTicks = current
+        }
+
+        var averages = [Double](repeating: 0, count: 3)
+        let averageCount = averages.withUnsafeMutableBufferPointer { buffer in
+            getloadavg(buffer.baseAddress, Int32(buffer.count))
+        }
+        let topology = Self.topology
+        let details = CPUDetails(
+            userFraction: user, systemFraction: system, idleFraction: idle,
+            perCoreFractions: perCore, coreTypes: topology.types,
+            physicalCores: topology.physical, logicalCores: topology.logical,
+            efficiencyCores: topology.efficiency, performanceCores: topology.performance,
+            superCores: topology.supers,
+            loadAverages: averageCount == 3 ? averages : nil,
+            uptimeSeconds: ProcessInfo.processInfo.systemUptime,
+            temperatureCelsius: cachedHardware?.temperatureCelsius,
+            frequencyMHz: cachedHardware?.frequencyMHz,
+            efficiencyFrequencyMHz: cachedHardware?.efficiencyFrequencyMHz,
+            performanceFrequencyMHz: cachedHardware?.performanceFrequencyMHz,
+            superFrequencyMHz: cachedHardware?.superFrequencyMHz,
+            topProcesses: cachedProcesses
+        )
+        return (busy, details)
+    }
+
+    private static func sysctlNumber(_ key: String) -> Int? {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname(key, &value, &size, nil, 0) == 0, value > 0 else { return nil }
+        return Int(value)
+    }
+
+    private static func sysctlText(_ key: String) -> String? {
+        var size: size_t = 0
+        guard sysctlbyname(key, nil, &size, nil, 0) == 0, size > 0, size < 256 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname(key, &buffer, &size, nil, 0) == 0 else { return nil }
+        return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
+    // Based on the AppleARMPE cluster-type mapping used by exelban/Stats (MIT).
+    // On M5/M6, P=Super, M=Performance and E=Efficiency; older Macs use P=Performance.
+    private static func readCoreTopology() -> CoreTopology {
+        let physical = sysctlNumber("hw.physicalcpu")
+        let logical = sysctlNumber("hw.logicalcpu")
+        let hasSuperCluster = (0..<4).contains { sysctlText("hw.perflevel\($0).name") == "Super" }
+        var mapped: [Int: String] = [:]
+        var iterator: io_iterator_t = 0
+        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleARMPE"), &iterator) == KERN_SUCCESS {
+            defer { IOObjectRelease(iterator) }
+            while case let service = IOIteratorNext(iterator), service != 0 {
+                defer { IOObjectRelease(service) }
+                var children: io_iterator_t = 0
+                guard IORegistryEntryGetChildIterator(service, kIOServicePlane, &children) == KERN_SUCCESS else { continue }
+                defer { IOObjectRelease(children) }
+                while case let child = IOIteratorNext(children), child != 0 {
+                    defer { IOObjectRelease(child) }
+                    var nameBuffer = [CChar](repeating: 0, count: 128)
+                    let readName = nameBuffer.withUnsafeMutableBufferPointer {
+                        IORegistryEntryGetName(child, $0.baseAddress!)
+                    }
+                    guard readName == KERN_SUCCESS else { continue }
+                    let name = String(decoding: nameBuffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                    guard name.hasPrefix("cpu"), let index = Int(name.dropFirst(3)), index >= 0 else { continue }
+                    guard let raw = IORegistryEntryCreateCFProperty(child, "cluster-type" as CFString,
+                                                                     kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data else { continue }
+                    let cluster = String(decoding: raw, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+                    switch cluster {
+                    case "E": mapped[index] = "efficiency"
+                    case "M": mapped[index] = "performance"
+                    case "P": mapped[index] = hasSuperCluster ? "super" : "performance"
+                    default: break
+                    }
+                }
             }
         }
-        guard result == KERN_SUCCESS else { return nil }
 
-        let used = UInt64(info.cpu_ticks.0) + UInt64(info.cpu_ticks.1) + UInt64(info.cpu_ticks.2)
-        let total = used + UInt64(info.cpu_ticks.3)
-        defer { previousCPU = (used, total) }
-        guard let previousCPU, total > previousCPU.total, used >= previousCPU.used else { return nil }
-        return min(1, Double(used - previousCPU.used) / Double(total - previousCPU.total))
+        // Individual core classifications are only used if IORegistry identifies every core.
+        let types: [String]? = {
+            guard let logical, logical > 0, (0..<logical).allSatisfy({ mapped[$0] != nil }) else { return nil }
+            return (0..<logical).map { mapped[$0]! }
+        }()
+        var counts: [String: Int] = [:]
+        for index in 0..<4 {
+            guard let name = sysctlText("hw.perflevel\(index).name"),
+                  let count = sysctlNumber("hw.perflevel\(index).logicalcpu") else { continue }
+            counts[name.lowercased(), default: 0] += count
+        }
+        if let types {
+            counts["efficiency"] = types.filter { $0 == "efficiency" }.count
+            counts["performance"] = types.filter { $0 == "performance" }.count
+            counts["super"] = types.filter { $0 == "super" }.count
+        }
+        return CoreTopology(physical: physical, logical: logical, types: types,
+                            efficiency: counts["efficiency"], performance: counts["performance"],
+                            supers: counts["super"])
+    }
+
+    private func refreshProcessesIfNeeded(at date: Date) {
+        guard !processesFetching, date.timeIntervalSince(lastProcessesFetch) >= 4 else { return }
+        lastProcessesFetch = date
+        processesFetching = true
+        Task.detached(priority: .utility) { [weak self] in
+            let processes = Self.readTopProcesses()
+            await self?.receivedProcesses(processes)
+        }
+    }
+
+    private func receivedProcesses(_ processes: [CPUProcess]) {
+        cachedProcesses = processes
+        processesFetching = false
+    }
+
+    // IOReport needs a real sampling interval, and SMC reads can briefly block.
+    // Keep both off the two-second main-actor snapshot timer.
+    private func refreshHardwareIfNeeded(at date: Date) {
+        guard !hardwareFetching, date.timeIntervalSince(lastHardwareFetch) >= 4 else { return }
+        hardwareFetching = true
+        lastHardwareFetch = date
+        Task.detached(priority: .utility) { [weak self] in
+            let reading = CPUHardwareSensorReader.shared.read()
+            await self?.receivedHardware(reading)
+        }
+    }
+
+    private func receivedHardware(_ reading: CPUHardwareReadings) {
+        cachedHardware = reading
+        hardwareFetching = false
+    }
+
+    nonisolated private static func readTopProcesses() -> [CPUProcess] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-Aceo", "pid,pcpu,comm", "-r"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [] }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        return Array(text.split(separator: "\n").dropFirst().prefix(8).compactMap { line in
+            let fields = line.split(maxSplits: 2, whereSeparator: { $0.isWhitespace })
+            guard fields.count == 3, let pid = Int(fields[0]),
+                  let percentage = Double(fields[1].replacingOccurrences(of: ",", with: ".")),
+                  percentage.isFinite, percentage >= 0 else { return nil }
+            let command = String(fields[2])
+            let name = (command as NSString).lastPathComponent
+            return CPUProcess(pid: pid, name: name, usagePercent: percentage)
+        })
     }
 
     private func memoryUsage() -> (used: UInt64, total: UInt64)? {
@@ -172,6 +379,330 @@ final class SystemSampler {
                   maximum > 0 else { continue }
             let charging = description[kIOPSIsChargingKey] as? Bool ?? false
             return (min(1, Double(current) / Double(maximum)), charging)
+        }
+        return nil
+    }
+}
+
+private struct CPUHardwareReadings: Sendable {
+    let temperatureCelsius: Double?
+    let frequencyMHz: Double?
+    let efficiencyFrequencyMHz: Double?
+    let performanceFrequencyMHz: Double?
+    let superFrequencyMHz: Double?
+}
+
+// Each read is scheduled once at a time by SystemSampler on a background task.
+// The SMC connection and IOReport subscription remain open for the process lifetime.
+private final class CPUHardwareSensorReader: @unchecked Sendable {
+    static let shared = CPUHardwareSensorReader()
+
+    private let smc = CPUAppleSMC()
+    private let frequency = CPUIOReport()
+
+    func read() -> CPUHardwareReadings {
+        let temperature = smc?.readTemperature()
+        let clocks = frequency?.readFrequency()
+        return CPUHardwareReadings(
+            temperatureCelsius: temperature,
+            frequencyMHz: clocks?.overall,
+            efficiencyFrequencyMHz: clocks?.efficiency,
+            performanceFrequencyMHz: clocks?.performance,
+            superFrequencyMHz: clocks?.superCore
+        )
+    }
+}
+
+// Read-only AppleSMC access works without the privileged fan-control helper.
+// SMC's key-info and read-byte commands follow the IOKit ABI used by
+// Serhiy Mytrovtsiy's MIT-licensed Stats project (SMC/smc.swift).
+private final class CPUAppleSMC {
+    private struct Version {
+        var major: UInt8 = 0
+        var minor: UInt8 = 0
+        var build: UInt8 = 0
+        var reserved: UInt8 = 0
+        var release: UInt16 = 0
+    }
+    private struct Limits {
+        var version: UInt16 = 0
+        var length: UInt16 = 0
+        var cpu: UInt32 = 0
+        var gpu: UInt32 = 0
+        var memory: UInt32 = 0
+    }
+    private struct KeyInfo {
+        var size: UInt32 = 0
+        var type: UInt32 = 0
+        var attributes: UInt8 = 0
+    }
+    private typealias SensorBytes = (
+        UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+        UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+        UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
+        UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8
+    )
+    private struct KeyData {
+        var key: UInt32 = 0
+        var version = Version()
+        var limits = Limits()
+        var keyInfo = KeyInfo()
+        var padding: UInt16 = 0
+        var result: UInt8 = 0
+        var status: UInt8 = 0
+        var command: UInt8 = 0
+        var data32: UInt32 = 0
+        var bytes: SensorBytes = (
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        )
+    }
+
+    private var connection: io_connect_t = 0
+    // Validated on Mac18,5 (M6), macOS 27.0.1: Te* and Tp* keys respond
+    // with changing, plausible die temperatures. Never average GPU Tg* keys.
+    private let m6Keys = [
+        "Te07", "Te08", "Te09", "Te0c", "Te0e", "Te0f", "Te0g", "Te0h", "Te0i",
+        "Tp05", "Tp07", "Tp09", "Tp0A", "Tp0E", "Tp0G", "Tp0I", "Tp0L",
+        "Tp0b", "Tp0d", "Tp0g", "Tp0j", "Tp0m", "Tp0o", "Tp0r",
+        "Tp0t", "Tp0u", "Tp0w", "Tp0x", "Tp0y", "Tp0z"
+    ]
+
+    init?() {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSMC"),
+                                           &iterator) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iterator) }
+        let service = IOIteratorNext(iterator)
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        guard IOServiceOpen(service, mach_task_self_, 0, &connection) == KERN_SUCCESS else { return nil }
+    }
+
+    deinit {
+        if connection != 0 { IOServiceClose(connection) }
+    }
+
+    func readTemperature() -> Double? {
+        // Probe only chip-temperature candidates, not arbitrary SMC readings.
+        // Known older Intel keys are supported; unknown chips gracefully return nil.
+        let model = Self.hardwareModel()
+        let keys = model.hasPrefix("Mac18,") ? m6Keys :
+            ["TC0D", "TC0E", "TC0F", "TC0P", "TC0H"]
+        let temperatures = keys.compactMap { key -> Double? in
+            guard let value = read(key), value.isFinite, (10...120).contains(value) else { return nil }
+            return value
+        }
+        guard !temperatures.isEmpty else { return nil }
+        return temperatures.reduce(0, +) / Double(temperatures.count)
+    }
+
+    private static func hardwareModel() -> String {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, (1...128).contains(size) else { return "" }
+        var bytes = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &bytes, &size, nil, 0) == 0 else { return "" }
+        return String(decoding: bytes.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
+    private func invoke(_ request: inout KeyData) -> KeyData? {
+        var reply = KeyData()
+        var replySize = MemoryLayout<KeyData>.stride
+        let result = IOConnectCallStructMethod(connection, 2, &request,
+                                               MemoryLayout<KeyData>.stride, &reply, &replySize)
+        guard result == KERN_SUCCESS, reply.result == 0,
+              replySize >= MemoryLayout<KeyData>.size else { return nil }
+        return reply
+    }
+
+    private func read(_ name: String) -> Double? {
+        guard name.utf8.count == 4 else { return nil }
+        let code = name.utf8.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        var infoRequest = KeyData()
+        infoRequest.key = code
+        infoRequest.command = 9
+        guard let info = invoke(&infoRequest)?.keyInfo, (1...32).contains(info.size) else { return nil }
+
+        var valueRequest = KeyData()
+        valueRequest.key = code
+        valueRequest.command = 5
+        valueRequest.keyInfo.size = info.size
+        guard let value = invoke(&valueRequest) else { return nil }
+        let bytes = withUnsafeBytes(of: value.bytes) { Array($0) }
+        let typeBytes = [
+            UInt8((info.type >> 24) & 0xff), UInt8((info.type >> 16) & 0xff),
+            UInt8((info.type >> 8) & 0xff), UInt8(info.type & 0xff)
+        ]
+        switch String(decoding: typeBytes, as: UTF8.self) {
+        case "flt " where info.size >= 4:
+            let raw = UInt32(bytes[0]) | UInt32(bytes[1]) << 8 |
+                UInt32(bytes[2]) << 16 | UInt32(bytes[3]) << 24
+            return Double(Float(bitPattern: raw))
+        case "sp78" where info.size >= 2:
+            return Double((UInt16(bytes[0]) << 8) | UInt16(bytes[1])) / 256
+        case "sp87" where info.size >= 2:
+            return Double((UInt16(bytes[0]) << 8) | UInt16(bytes[1])) / 128
+        default:
+            return nil
+        }
+    }
+}
+
+// Private IOReport provides measured CPU power-state residencies, rather than
+// fixed/base clocks. All symbols and channels are optional because macOS may
+// change or restrict this interface. The subscription is initialized only once.
+private final class CPUIOReport {
+    private typealias ChannelFunction = @convention(c) (CFString?, CFString?, UInt64, UInt64, UInt64) -> Unmanaged<CFDictionary>?
+    private typealias SubscriptionFunction = @convention(c) (UnsafeMutableRawPointer?, CFMutableDictionary, UnsafeMutablePointer<Unmanaged<CFMutableDictionary>?>?, UInt64, CFTypeRef?) -> UnsafeMutableRawPointer?
+    private typealias SampleFunction = @convention(c) (UnsafeMutableRawPointer?, CFMutableDictionary, CFTypeRef?) -> Unmanaged<CFDictionary>?
+    private typealias DeltaFunction = @convention(c) (CFDictionary, CFDictionary, CFTypeRef?) -> Unmanaged<CFDictionary>?
+    private typealias ChannelNameFunction = @convention(c) (CFDictionary) -> Unmanaged<CFString>?
+    private typealias StateCountFunction = @convention(c) (CFDictionary) -> Int32
+    private typealias ResidencyFunction = @convention(c) (CFDictionary, Int32) -> Int64
+
+    struct Reading {
+        let overall: Double?
+        let efficiency: Double?
+        let performance: Double?
+        let superCore: Double?
+    }
+
+    private let library: UnsafeMutableRawPointer
+    private let channels: CFMutableDictionary
+    private let subscription: UnsafeMutableRawPointer
+    private let samples: SampleFunction
+    private let delta: DeltaFunction
+    private let channelName: ChannelNameFunction
+    private let stateCount: StateCountFunction
+    private let residency: ResidencyFunction
+    private let efficiencyStates: [Double]
+    private let middleStates: [Double]
+    private let highStates: [Double]
+
+    init?() {
+        guard let handle = dlopen("/usr/lib/libIOReport.dylib", RTLD_LAZY | RTLD_LOCAL) else { return nil }
+        func symbol<T>(_ name: String, _ type: T.Type) -> T? {
+            guard let pointer = dlsym(handle, name) else { return nil }
+            return unsafeBitCast(pointer, to: T.self)
+        }
+        guard let copy: ChannelFunction = symbol("IOReportCopyChannelsInGroup", ChannelFunction.self),
+              let subscribe: SubscriptionFunction = symbol("IOReportCreateSubscription", SubscriptionFunction.self),
+              let sample: SampleFunction = symbol("IOReportCreateSamples", SampleFunction.self),
+              let difference: DeltaFunction = symbol("IOReportCreateSamplesDelta", DeltaFunction.self),
+              let getName: ChannelNameFunction = symbol("IOReportChannelGetChannelName", ChannelNameFunction.self),
+              let getCount: StateCountFunction = symbol("IOReportStateGetCount", StateCountFunction.self),
+              let getResidency: ResidencyFunction = symbol("IOReportStateGetResidency", ResidencyFunction.self),
+              let raw = copy("CPU Stats" as CFString, "CPU Core Performance States" as CFString,
+                             0, 0, 0)?.takeRetainedValue(),
+              let selected = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, raw) else {
+            dlclose(handle)
+            return nil
+        }
+        let e = Self.frequencyStates(for: "voltage-states1-sram") ?? []
+        let upper = Self.frequencyStates(for: "voltage-states5-sram") ?? []
+        let middle = Self.frequencyStates(for: "voltage-states22-sram") ?? upper
+        guard !e.isEmpty || !middle.isEmpty || !upper.isEmpty else {
+            dlclose(handle)
+            return nil
+        }
+        var dictionary: Unmanaged<CFMutableDictionary>?
+        guard let activeSubscription = subscribe(nil, selected, &dictionary, 0, nil) else {
+            dictionary?.release()
+            dlclose(handle)
+            return nil
+        }
+        dictionary?.release()
+        library = handle
+        channels = selected
+        subscription = activeSubscription
+        samples = sample
+        delta = difference
+        channelName = getName
+        stateCount = getCount
+        residency = getResidency
+        efficiencyStates = e
+        middleStates = middle
+        highStates = upper
+    }
+
+    func readFrequency() -> Reading? {
+        guard let before = samples(subscription, channels, nil)?.takeRetainedValue() else { return nil }
+        Thread.sleep(forTimeInterval: 0.4)
+        guard let after = samples(subscription, channels, nil)?.takeRetainedValue(),
+              let difference = delta(before, after, nil)?.takeRetainedValue(),
+              let contents = difference as? [String: Any],
+              let items = contents["IOReportChannels"] as? NSArray else { return nil }
+
+        var weighted = [Double](repeating: 0, count: 3)
+        var active = [Double](repeating: 0, count: 3)
+        var detected = [Int](repeating: 0, count: 3)
+        let channelsList = items as CFArray
+        for i in 0..<CFArrayGetCount(channelsList) {
+            let item = unsafeBitCast(CFArrayGetValueAtIndex(channelsList, i), to: CFDictionary.self)
+            guard let label = channelName(item)?.takeUnretainedValue() as String? else { continue }
+            let group: Int
+            let states: [Double]
+            if label.contains("_ECPU") {
+                group = 0
+                states = efficiencyStates
+            } else if label.contains("_MCPU") {
+                group = 1
+                states = middleStates
+            } else if label.contains("_PCPU") {
+                group = 2
+                states = highStates
+            } else {
+                continue
+            }
+            guard !states.isEmpty, stateCount(item) == states.count + 1,
+                  residency(item, 0) >= 0 else { continue }
+            detected[group] += 1
+            // State 0 is IDLE. Remaining state indices match the PMGR voltage
+            // table from low to high MHz; weight each by observed active ticks.
+            for index in states.indices {
+                let ticks = residency(item, Int32(index + 1))
+                guard ticks > 0 else { continue }
+                active[group] += Double(ticks)
+                weighted[group] += Double(ticks) * states[index]
+            }
+        }
+        func frequency(_ group: Int) -> Double? {
+            guard detected[group] > 0, active[group] > 0 else { return nil }
+            return weighted[group] / active[group]
+        }
+        // M5/M6 expose a middle MCPU and super PCPU; earlier chips expose
+        // just ECPU + PCPU, where PCPU denotes regular performance cores.
+        let middleExists = detected[1] > 0
+        let activeTotal = active.reduce(0, +)
+        return Reading(
+            overall: activeTotal > 0 ? weighted.reduce(0, +) / activeTotal : nil,
+            efficiency: frequency(0),
+            performance: middleExists ? frequency(1) : frequency(2),
+            superCore: middleExists ? frequency(2) : nil
+        )
+    }
+
+    private static func frequencyStates(for key: String) -> [Double]? {
+        for name in ["pmgr-child", "pmgr"] {
+            var iterator: io_iterator_t = 0
+            guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching(name),
+                                               &iterator) == KERN_SUCCESS else { continue }
+            defer { IOObjectRelease(iterator) }
+            while case let service = IOIteratorNext(iterator), service != 0 {
+                defer { IOObjectRelease(service) }
+                var unmanaged: Unmanaged<CFMutableDictionary>?
+                guard IORegistryEntryCreateCFProperties(service, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+                      let properties = unmanaged?.takeRetainedValue() as? [String: Any],
+                      let data = properties[key] as? Data,
+                      data.count >= 8, data.count % 8 == 0 else { continue }
+                let bytes = [UInt8](data)
+                let values = stride(from: 0, to: bytes.count, by: 8).map { offset -> Double in
+                    let raw = UInt32(bytes[offset]) | UInt32(bytes[offset + 1]) << 8 |
+                        UInt32(bytes[offset + 2]) << 16 | UInt32(bytes[offset + 3]) << 24
+                    return Double(raw) / (raw >= 100_000_000 ? 1_000_000 : 1_000)
+                }
+                if values.allSatisfy({ (100...8_000).contains($0) }) { return values }
+            }
         }
         return nil
     }

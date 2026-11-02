@@ -50,7 +50,7 @@ final class StatsCompanionModel: ObservableObject {
         SecItemDelete(oldKey as CFDictionary)
         let first = sampler.sample()
         snapshot = first
-        recentSnapshots = [first]
+        recentSnapshots = [first.withoutCPUProcesses()]
         let defaults = UserDefaults.standard
         dockVisible = defaults.bool(forKey: "StatsCompanion.showDock")
         menuBarVisible = defaults.object(forKey: "StatsCompanion.showMenuBar") as? Bool ?? true
@@ -70,7 +70,7 @@ final class StatsCompanionModel: ObservableObject {
 
     func refresh() {
         snapshot = sampler.sample()
-        recentSnapshots.append(snapshot)
+        recentSnapshots.append(snapshot.withoutCPUProcesses())
         if recentSnapshots.count > 900 {
             recentSnapshots.removeFirst(recentSnapshots.count - 900)
         }
