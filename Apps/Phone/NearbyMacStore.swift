@@ -4,6 +4,45 @@ import Network
 import Security
 
 @MainActor
+private final class BonjourMacNameResolver: NSObject, @preconcurrency NetServiceDelegate {
+    private let service: NetService
+    private let onName: @MainActor (String) -> Void
+
+    init(name: String, type: String, domain: String, onName: @escaping @MainActor (String) -> Void) {
+        service = NetService(domain: domain, type: type.hasSuffix(".") ? type : type + ".", name: name)
+        self.onName = onName
+        super.init()
+    }
+
+    func start() {
+        service.delegate = self
+        service.resolve(withTimeout: 8)
+    }
+
+    func stop() {
+        service.stop()
+        service.delegate = nil
+    }
+
+    func netServiceDidResolveAddress(_ sender: NetService) {
+        if let record = sender.txtRecordData() { updateName(from: record) }
+        sender.startMonitoring()
+    }
+
+    func netService(_ sender: NetService, didUpdateTXTRecord data: Data) {
+        updateName(from: data)
+    }
+
+    private func updateName(from data: Data) {
+        guard let nameData = NetService.dictionary(fromTXTRecord: data)["name"],
+              let name = String(data: nameData, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return }
+        onName(name)
+    }
+}
+
+@MainActor
 final class NearbyMacStore: ObservableObject {
     struct Device: Identifiable {
         let endpoint: NWEndpoint
@@ -33,6 +72,8 @@ final class NearbyMacStore: ObservableObject {
 
     private var browser: NWBrowser?
     private var browserGeneration = UUID()
+    private var nameResolvers: [String: BonjourMacNameResolver] = [:]
+    private var discoveredNames: [String: String] = [:]
     private var selectedEndpoint: NWEndpoint?
     private var selectedKey: Data?
     private var selectedPhoneID: UUID?
@@ -126,6 +167,7 @@ final class NearbyMacStore: ObservableObject {
         browserGeneration = UUID()
         browser?.cancel()
         browser = nil
+        clearNameResolvers()
         devices = []
         selectedReachable = false
         selectionGeneration = UUID()
@@ -142,6 +184,12 @@ final class NearbyMacStore: ObservableObject {
         refresh()
     }
 
+    private func clearNameResolvers() {
+        for resolver in nameResolvers.values { resolver.stop() }
+        nameResolvers.removeAll()
+        discoveredNames.removeAll()
+    }
+
     private func startBrowserIfNeeded() {
         guard discoveryRequested, !discoveryPaused, browser == nil else { return }
         let generation = UUID()
@@ -151,16 +199,42 @@ final class NearbyMacStore: ObservableObject {
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             Task { @MainActor in
                 guard let self, self.browserGeneration == generation else { return }
-                self.devices = results.compactMap { result in
+                let availableNames = Set(results.compactMap { result -> String? in
                     guard case let .service(name, _, _, _) = result.endpoint else { return nil }
+                    return name
+                })
+                for name in self.nameResolvers.keys.filter({ !availableNames.contains($0) }) {
+                    self.nameResolvers.removeValue(forKey: name)?.stop()
+                    self.discoveredNames.removeValue(forKey: name)
+                }
+                self.devices = results.compactMap { result in
+                    guard case let .service(name, type, domain, _) = result.endpoint else { return nil }
                     let advertisedName: String?
                     if case let .bonjour(record) = result.metadata {
                         advertisedName = record["name"]?.trimmingCharacters(in: .whitespacesAndNewlines)
                     } else {
                         advertisedName = nil
                     }
+                    if let advertisedName, !advertisedName.isEmpty {
+                        self.discoveredNames[name] = advertisedName
+                    } else if self.nameResolvers[name] == nil {
+                        let resolver = BonjourMacNameResolver(name: name, type: type, domain: domain) {
+                            [weak self] resolvedName in
+                            guard let self, self.browserGeneration == generation,
+                                  self.devices.contains(where: { $0.name == name }),
+                                  self.discoveredNames[name] != resolvedName else { return }
+                            self.discoveredNames[name] = resolvedName
+                            self.devices = self.devices.map { device in
+                                guard device.name == name else { return device }
+                                return Device(endpoint: device.endpoint, name: name, displayName: resolvedName)
+                            }.sorted { $0.displayName < $1.displayName }
+                            if self.selectedName == name { self.updateSelectedDisplayName(resolvedName) }
+                        }
+                        self.nameResolvers[name] = resolver
+                        resolver.start()
+                    }
                     return Device(endpoint: result.endpoint, name: name,
-                                  displayName: advertisedName?.isEmpty == false ? advertisedName : nil)
+                                  displayName: self.discoveredNames[name])
                 }.sorted { $0.displayName < $1.displayName }
                 if let name = self.selectedName,
                    let device = self.devices.first(where: { $0.name == name }) {
@@ -184,6 +258,7 @@ final class NearbyMacStore: ObservableObject {
                     self.browserGeneration = UUID()
                     self.browser?.cancel()
                     self.browser = nil
+                    self.clearNameResolvers()
                     self.devices = []
                     if self.selectedName == nil {
                         self.status = "Discovery failed: \(error.localizedDescription)"

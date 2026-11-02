@@ -130,6 +130,7 @@ private struct DashboardSettingsView: View {
     @ObservedObject var nearby: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
     @State private var showAbout = false
+    @State private var showForgetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -147,10 +148,27 @@ private struct DashboardSettingsView: View {
                 Section {
                     Button("About This Mac") { showAbout = true }
                 }
+                if nearby.selectedName != nil {
+                    Section {
+                        Button("Forget This Mac", role: .destructive) {
+                            showForgetConfirmation = true
+                        }
+                    }
+                }
             }
             .navigationTitle("Settings")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showAbout) { AboutThisMacView(store: nearby) }
+            .confirmationDialog("Forget This Mac?", isPresented: $showForgetConfirmation,
+                                titleVisibility: .visible) {
+                Button("Forget This Mac", role: .destructive) {
+                    nearby.forget()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This iPhone will forget \(nearby.selectedDisplayName ?? "this Mac") and its saved pairing. You'll need a new passcode to connect again.")
+            }
         }
     }
 }
