@@ -633,8 +633,11 @@ private final class CPUIOReport {
               let contents = difference as? [String: Any],
               let items = contents["IOReportChannels"] as? NSArray else { return nil }
 
-        var weighted = [Double](repeating: 0, count: 3)
-        var active = [Double](repeating: 0, count: 3)
+        // Match Exelban Stats' definition of "All cores": first calculate the
+        // active-state average for EACH logical core, then average equally across
+        // the cores of a cluster, and finally across all measured cores. Weighting
+        // raw residency ticks across cores instead overrepresents busy cores.
+        var frequencySum = [Double](repeating: 0, count: 3)
         var detected = [Int](repeating: 0, count: 3)
         let channelsList = items as CFArray
         for i in 0..<CFArrayGetCount(channelsList) {
@@ -656,26 +659,33 @@ private final class CPUIOReport {
             }
             guard !states.isEmpty, stateCount(item) == states.count + 1,
                   residency(item, 0) >= 0 else { continue }
-            detected[group] += 1
             // State 0 is IDLE. Remaining state indices match the PMGR voltage
-            // table from low to high MHz; weight each by observed active ticks.
+            // table from low to high MHz; weight each by this core's active ticks.
+            var activeTicks = 0.0
+            var weightedTicks = 0.0
             for index in states.indices {
                 let ticks = residency(item, Int32(index + 1))
                 guard ticks > 0 else { continue }
-                active[group] += Double(ticks)
-                weighted[group] += Double(ticks) * states[index]
+                activeTicks += Double(ticks)
+                weightedTicks += Double(ticks) * states[index]
             }
+            // Exelban applies the lowest supported clock to fully idle cores.
+            let coreFrequency = activeTicks > 0
+                ? max(states[0], weightedTicks / activeTicks)
+                : states[0]
+            frequencySum[group] += coreFrequency
+            detected[group] += 1
         }
         func frequency(_ group: Int) -> Double? {
-            guard detected[group] > 0, active[group] > 0 else { return nil }
-            return weighted[group] / active[group]
+            guard detected[group] > 0 else { return nil }
+            return frequencySum[group] / Double(detected[group])
         }
         // M5/M6 expose a middle MCPU and super PCPU; earlier chips expose
         // just ECPU + PCPU, where PCPU denotes regular performance cores.
         let middleExists = detected[1] > 0
-        let activeTotal = active.reduce(0, +)
+        let sampledCoreCount = detected.reduce(0, +)
         return Reading(
-            overall: activeTotal > 0 ? weighted.reduce(0, +) / activeTotal : nil,
+            overall: sampledCoreCount > 0 ? frequencySum.reduce(0, +) / Double(sampledCoreCount) : nil,
             efficiency: frequency(0),
             performance: middleExists ? frequency(1) : frequency(2),
             superCore: middleExists ? frequency(2) : nil
