@@ -20,9 +20,7 @@ final class CPUDetailsTests: XCTestCase {
         XCTAssertEqual(restored.cpuDetails?.topProcesses?.first?.usagePercent, 128.5)
 
         let historical = sample.withoutCPUProcesses()
-        XCTAssertNil(historical.cpuDetails?.topProcesses)
-        XCTAssertEqual(historical.cpuDetails?.perCoreFractions, [0.25, 0.31, 0.07])
-        XCTAssertEqual(historical.cpuDetails?.superFrequencyMHz, 4_520)
+        XCTAssertNil(historical.cpuDetails)
         XCTAssertEqual(historical.cpuFraction, sample.cpuFraction)
     }
 

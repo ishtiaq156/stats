@@ -43,9 +43,9 @@ final class RAMDetailsTests: XCTestCase {
                                       cpuDetails: cpu, ramDetails: ram)
 
         let history = snapshot.withoutCPUProcesses()
-        XCTAssertNil(history.cpuDetails?.topProcesses)
+        XCTAssertNil(history.cpuDetails)
         XCTAssertNil(history.ramDetails)
-        XCTAssertEqual(history.cpuDetails?.userFraction, 0.2)
+        XCTAssertEqual(history.cpuFraction, 0.2)
         XCTAssertEqual(history.memoryUsedBytes, snapshot.memoryUsedBytes)
         XCTAssertEqual(history.memoryTotalBytes, snapshot.memoryTotalBytes)
     }

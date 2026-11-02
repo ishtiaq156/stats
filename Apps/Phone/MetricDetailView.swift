@@ -96,6 +96,8 @@ struct MetricDetailView: View {
             CPUDetailView(store: store)
         } else if kind == .memory {
             RAMDetailView(store: store)
+        } else if kind == .storage {
+            DiskDetailView(store: store)
         } else {
             standardDetail
         }
@@ -1178,5 +1180,545 @@ private struct RAMUsageRing: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Memory usage")
         .accessibilityValue(centralText)
+    }
+}
+
+private struct DiskIOPoint: Identifiable {
+    let timestamp: Date
+    let readBytesPerSecond: Double?
+    let writeBytesPerSecond: Double?
+    var id: Date { timestamp }
+
+    init?(timestamp: Date, read: Double?, write: Double?) {
+        let validRead = read.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let validWrite = write.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        guard validRead != nil || validWrite != nil else { return nil }
+        self.timestamp = timestamp
+        readBytesPerSecond = validRead
+        writeBytesPerSecond = validWrite
+    }
+}
+
+/// One card per mounted volume; historical I/O is matched by stable volume ID.
+private struct DiskDetailView: View {
+    @ObservedObject var store: NearbyMacStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var capturedHistory: [String: [DiskIOPoint]] = [:]
+
+    private let readColor = Color(red: 0.06, green: 0.56, blue: 0.98)
+    private let writeColor = Color(red: 0.97, green: 0.31, blue: 0.36)
+
+    private var panelColor: Color {
+        colorScheme == .dark ? Color(white: 0.25) : Color(uiColor: .secondarySystemGroupedBackground)
+    }
+    private var volumes: [DiskVolume] { store.snapshot?.diskDetails?.volumes ?? [] }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 13) {
+                HStack(spacing: 8) {
+                    Image(systemName: "internaldrive")
+                        .foregroundStyle(.secondary)
+                    Text(store.selectedDisplayName ?? "Mac")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Circle()
+                        .fill(store.selectedReachable ? Color.green : Color.secondary)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                    Text(store.selectedReachable ? "Connected" : "Offline")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 4)
+
+                if !volumes.isEmpty {
+                    ForEach(volumes, id: \.id) { volume in
+                        DiskVolumeCard(volume: volume,
+                                       history: history(for: volume.id),
+                                       background: panelColor,
+                                       readColor: readColor,
+                                       writeColor: writeColor)
+                    }
+                } else if let snapshot = store.snapshot,
+                          snapshot.diskTotalBytes != nil || snapshot.diskFreeBytes != nil {
+                    DiskVolumeCard(volume: nil,
+                                   legacyTotal: snapshot.diskTotalBytes,
+                                   legacyFree: snapshot.diskFreeBytes,
+                                   history: [], background: panelColor,
+                                   readColor: readColor, writeColor: writeColor)
+                } else {
+                    ContentUnavailableView(
+                        "Waiting for disk readings",
+                        systemImage: "internaldrive",
+                        description: Text("Disk information appears after a reading arrives from your Mac.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(15)
+                    .background(panelColor, in: RoundedRectangle(cornerRadius: 18))
+                }
+
+                processCard
+            }
+            .frame(maxWidth: 540)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Disk")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { capture(store.snapshot) }
+        .onChange(of: store.snapshot) { _, snapshot in capture(snapshot) }
+        .onChange(of: store.selectedName) { _, _ in capturedHistory.removeAll() }
+    }
+
+    private func history(for volumeID: String) -> [DiskIOPoint] {
+        // History may omit disk details on older companions. Local live sampling
+        // still provides an honest short chart while this screen is open.
+        let remote = store.history.compactMap { snapshot -> DiskIOPoint? in
+            guard let volume = snapshot.diskDetails?.volumes.first(where: { $0.id == volumeID }) else {
+                return nil
+            }
+            return DiskIOPoint(timestamp: snapshot.timestamp,
+                               read: volume.readBytesPerSecond,
+                               write: volume.writeBytesPerSecond)
+        }
+        let local = capturedHistory[volumeID] ?? []
+        var byTime: [Date: DiskIOPoint] = [:]
+        for point in remote { byTime[point.timestamp] = point }
+        for point in local { byTime[point.timestamp] = point }
+        let samples = byTime.values.sorted { $0.timestamp < $1.timestamp }
+        guard samples.count > 180 else { return samples }
+        // Keep the first/last and each direction's own peak in every bucket.
+        // A large read burst must never cause a smaller write peak to vanish.
+        let bucketSize = Int(ceil(Double(samples.count) / 90.0))
+        var result: [DiskIOPoint] = []
+        result.reserveCapacity(364)
+        for start in stride(from: 0, to: samples.count, by: bucketSize) {
+            let bucket = samples[start..<min(samples.count, start + bucketSize)]
+            let candidates: [DiskIOPoint?] = [
+                bucket.first, bucket.last,
+                bucket.max { ($0.readBytesPerSecond ?? 0) < ($1.readBytesPerSecond ?? 0) },
+                bucket.max { ($0.writeBytesPerSecond ?? 0) < ($1.writeBytesPerSecond ?? 0) }
+            ]
+            var seen = Set<Date>()
+            result.append(contentsOf: candidates.compactMap { $0 }
+                .filter { seen.insert($0.timestamp).inserted }
+                .sorted { $0.timestamp < $1.timestamp })
+        }
+        if let last = samples.last, result.last?.timestamp != last.timestamp { result.append(last) }
+        return result
+    }
+
+    private func capture(_ snapshot: MetricSnapshot?) {
+        guard let snapshot else { return }
+        for volume in snapshot.diskDetails?.volumes ?? [] {
+            guard let point = DiskIOPoint(timestamp: snapshot.timestamp,
+                                          read: volume.readBytesPerSecond,
+                                          write: volume.writeBytesPerSecond) else { continue }
+            var history = capturedHistory[volume.id] ?? []
+            if history.last?.timestamp == point.timestamp { history[history.count - 1] = point }
+            else { history.append(point) }
+            if history.count > 180 { history.removeFirst(history.count - 180) }
+            capturedHistory[volume.id] = history
+        }
+    }
+
+    private var processCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+                Text("TOP PROCESSES")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityAddTraits(.isHeader)
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+            }
+            if dynamicTypeSize.isAccessibilitySize {
+                Text("Process · read and write rates")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 8) {
+                    Text("Process")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Read")
+                        .frame(width: 76, alignment: .trailing)
+                    Text("Write")
+                        .frame(width: 76, alignment: .trailing)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            }
+
+            if let reported = store.snapshot?.diskDetails?.topProcesses {
+                let ranked = Array(reported.sorted {
+                    diskRateValue($0.readBytesPerSecond) + diskRateValue($0.writeBytesPerSecond) >
+                    diskRateValue($1.readBytesPerSecond) + diskRateValue($1.writeBytesPerSecond)
+                }.prefix(8))
+                if ranked.isEmpty {
+                    Text("No processes reported")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(ranked, id: \.pid) { process in
+                        processRow(process)
+                    }
+                }
+            } else {
+                Text("Per-process disk activity unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(17)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(panelColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func processRow(_ process: DiskProcess) -> some View {
+        let name = process.name.isEmpty ? "PID \(process.pid)" : process.name
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.subheadline.weight(.medium))
+                HStack(spacing: 14) {
+                    Text("Read \(diskRate(process.readBytesPerSecond))")
+                        .foregroundStyle(readColor)
+                    Text("Write \(diskRate(process.writeBytesPerSecond))")
+                        .foregroundStyle(writeColor)
+                }
+                .font(.caption)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), process \(process.pid)")
+            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond)), write \(diskRate(process.writeBytesPerSecond))")
+        } else {
+            HStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "app.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 19, height: 19)
+                        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                        .accessibilityHidden(true)
+                    Text(name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(diskRate(process.readBytesPerSecond))
+                    .frame(width: 76, alignment: .trailing)
+                    .foregroundStyle(readColor)
+                Text(diskRate(process.writeBytesPerSecond))
+                    .frame(width: 76, alignment: .trailing)
+                    .foregroundStyle(writeColor)
+            }
+            .font(.caption)
+            .monospacedDigit()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), process \(process.pid)")
+            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond)), write \(diskRate(process.writeBytesPerSecond))")
+        }
+    }
+}
+
+private func diskRate(_ bytesPerSecond: Double?) -> String {
+    guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return "—" }
+    // ByteCountFormatter spells zero as "Zero KB" on some locales.
+    if bytesPerSecond < 1 { return "0 B/s" }
+    return MetricFormat.rate(bytesPerSecond)
+}
+
+private func diskRateValue(_ bytesPerSecond: Double?) -> Double {
+    guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return 0 }
+    return bytesPerSecond
+}
+
+/// The read and write traces use independent visual scales. A large read spike
+/// must not flatten a smaller, genuinely measured write trace (or vice versa).
+/// The chart has no numeric Y axis; the adjacent values remain actual B/s.
+private func diskChartScale(_ rates: [Double]) -> Double {
+    let active = rates.filter { $0.isFinite && $0 > 0 }.sorted()
+    guard !active.isEmpty else { return 1 }
+    return max(1, active[Int(Double(active.count - 1) * 0.9)])
+}
+
+/// Draw each direction in its own half of the plot. Explicit canvas fills
+/// avoid Swift Charts combining ungrouped area marks into a single blue series.
+private struct DiskActivityPlot: View {
+    let history: [DiskIOPoint]
+    let readColor: Color
+    let writeColor: Color
+
+    var body: some View {
+        let readScale = diskChartScale(history.compactMap(\.readBytesPerSecond))
+        let writeScale = diskChartScale(history.compactMap(\.writeBytesPerSecond))
+        Canvas { context, size in
+            guard let first = history.first, let last = history.last,
+                  size.width > 0, size.height > 0 else { return }
+
+            let middle = size.height / 2
+            let beginning = first.timestamp.timeIntervalSinceReferenceDate
+            let duration = max(1, last.timestamp.timeIntervalSinceReferenceDate - beginning)
+
+            // Read activity is blue below the baseline; write activity is red above.
+            // Each has its own scale so one busy direction cannot hide the other.
+            drawSeries(in: context, size: size, middle: middle,
+                       beginning: beginning, duration: duration,
+                       scale: readScale, isWrite: false, color: readColor)
+            drawSeries(in: context, size: size, middle: middle,
+                       beginning: beginning, duration: duration,
+                       scale: writeScale, isWrite: true, color: writeColor)
+
+            var baseline = Path()
+            baseline.move(to: CGPoint(x: 0, y: middle))
+            baseline.addLine(to: CGPoint(x: size.width, y: middle))
+            context.stroke(baseline, with: .color(.secondary.opacity(0.38)), lineWidth: 0.7)
+        }
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func drawSeries(in context: GraphicsContext, size: CGSize,
+                            middle: CGFloat, beginning: TimeInterval,
+                            duration: TimeInterval, scale: Double,
+                            isWrite: Bool, color: Color) {
+        var points: [CGPoint] = []
+        let halfHeight = max(0, middle - 2)
+
+        func drawSegment() {
+            guard let first = points.first, let last = points.last else { return }
+            var filledArea = Path()
+            filledArea.move(to: CGPoint(x: first.x, y: middle))
+            for point in points { filledArea.addLine(to: point) }
+            filledArea.addLine(to: CGPoint(x: last.x, y: middle))
+            filledArea.closeSubpath()
+            context.fill(filledArea, with: .color(color.opacity(0.67)))
+
+            var outline = Path()
+            outline.move(to: first)
+            for point in points.dropFirst() { outline.addLine(to: point) }
+            context.stroke(outline, with: .color(color), lineWidth: 1.35)
+        }
+
+        for sample in history {
+            let rate = isWrite ? sample.writeBytesPerSecond : sample.readBytesPerSecond
+            guard let rate, rate.isFinite, rate >= 0 else {
+                // Do not bridge periods where the Mac reported no measurement.
+                drawSegment()
+                points.removeAll(keepingCapacity: true)
+                continue
+            }
+            let x = CGFloat((sample.timestamp.timeIntervalSinceReferenceDate - beginning) / duration)
+                * size.width
+            let amplitude = CGFloat(min(1, rate / scale)) * halfHeight
+            points.append(CGPoint(x: x, y: middle + (isWrite ? -amplitude : amplitude)))
+        }
+        drawSegment()
+    }
+}
+
+private struct DiskVolumeCard: View {
+    let volume: DiskVolume?
+    var legacyTotal: UInt64? = nil
+    var legacyFree: UInt64? = nil
+    let history: [DiskIOPoint]
+    let background: Color
+    let readColor: Color
+    let writeColor: Color
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var name: String { volume?.name.isEmpty == false ? (volume?.name ?? "") : "Startup volume" }
+    private var total: UInt64? { volume?.totalBytes ?? legacyTotal }
+    private var free: UInt64? { volume?.freeBytes ?? legacyFree }
+    private var usedFraction: Double? {
+        guard let total, let free, total > 0, free <= total else { return nil }
+        return 1 - Double(free) / Double(total)
+    }
+    private var readRate: Double? { volume?.readBytesPerSecond }
+    private var writeRate: Double? { volume?.writeBytesPerSecond }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 9) {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 4)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ioLabel("Read", rate: readRate, color: readColor)
+                        ioLabel("Write", rate: writeRate, color: writeColor)
+                    }
+                    .frame(width: 116, alignment: .leading)
+                    activityChart
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 14) {
+                        ioLabel("Read", rate: readRate, color: readColor)
+                        ioLabel("Write", rate: writeRate, color: writeColor)
+                    }
+                    activityChart
+                }
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.18))
+                    if let usedFraction {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.blue.gradient)
+                            .frame(width: proxy.size.width * usedFraction)
+                    }
+                }
+            }
+            .frame(height: 9)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Disk capacity used")
+            .accessibilityValue(usedFraction.map { MetricFormat.percent($0) } ?? "Unavailable")
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(MetricFormat.bytes(free)) of \(MetricFormat.bytes(total)) free")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 1)
+                Text(usedFraction.map { MetricFormat.percent(1 - $0) } ?? "—")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
+
+            VStack(spacing: 9) {
+                detailRow("Total read", MetricFormat.bytes(volume?.totalReadBytes))
+                detailRow("Total written", MetricFormat.bytes(volume?.totalWrittenBytes))
+                detailRow("File system", volume?.fileSystem.map { $0.uppercased() } ?? "Unavailable")
+                detailRow("Connection type", text(volume?.connectionType))
+            }
+            if let smart = volume?.smart { smartDetails(smart) }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func ioLabel(_ name: String, rate: Double?, color: Color) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(name)
+                .foregroundStyle(.secondary)
+            Text(diskRate(rate))
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+        }
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var activityChart: some View {
+        if history.count >= 2 {
+            DiskActivityPlot(history: history, readColor: readColor, writeColor: writeColor)
+            .frame(height: 95)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name) read and write activity history")
+            .accessibilityValue("\(history.count) samples; blue reads below center and red writes above center, independently scaled. Last read \(diskRate(readRate)), write \(diskRate(writeRate))")
+        } else {
+            VStack(spacing: 5) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text(readRate == nil && writeRate == nil ? "Disk I/O rates unavailable" :
+                        "History appears after two I/O readings")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 95)
+            .background(Color.blue.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+        }
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .fontWeight(.medium)
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                .minimumScaleFactor(0.75)
+        }
+        .font(.subheadline)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func text(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "Unavailable" }
+        return value
+    }
+
+    @ViewBuilder
+    private func smartDetails(_ smart: DiskSMART) -> some View {
+        let hasMetrics = smart.totalReadBytes != nil || smart.totalWrittenBytes != nil ||
+            smart.temperatureCelsius != nil || smart.healthPercent != nil ||
+            smart.powerCycles != nil || smart.powerOnHours != nil ||
+            smart.criticalWarning != nil || smart.availableSparePercent != nil
+        if hasMetrics {
+            HStack(spacing: 10) {
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+                Text("SMART")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityValue(smart.status ?? "Status unavailable")
+                Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+            }
+            .padding(.top, 2)
+            VStack(spacing: 9) {
+                detailRow("Total read", MetricFormat.bytes(smart.totalReadBytes))
+                detailRow("Total written", MetricFormat.bytes(smart.totalWrittenBytes))
+                detailRow("Temperature", smart.temperatureCelsius.flatMap { value in
+                    value.isFinite ? Measurement(value: value, unit: UnitTemperature.celsius)
+                        .formatted(.measurement(width: .abbreviated, usage: .weather)) : nil
+                } ?? "Unavailable")
+                detailRow("Health", smart.healthPercent.map { percent($0) } ?? "Unavailable")
+                detailRow("Power cycles", smart.powerCycles?.formatted() ?? "Unavailable")
+                detailRow("Power on hours", smart.powerOnHours.map { $0.formatted() + " h" } ?? "Unavailable")
+                detailRow("Critical warning", smart.criticalWarning.flatMap { $0.isEmpty ? nil : $0 } ?? "Unavailable")
+                detailRow("Available spare", smart.availableSparePercent.map { percent($0) } ?? "Unavailable")
+            }
+        } else if let status = smart.status, status != "Not Supported", !status.isEmpty {
+            // A SMART status alone is useful but does not imply any of the
+            // device-health counters in the detailed section are available.
+            Divider().padding(.vertical, 1)
+            detailRow("SMART status", status)
+        }
+    }
+
+    private func percent(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "Unavailable" }
+        return value.formatted(.number.precision(.fractionLength(0))) + "%"
     }
 }

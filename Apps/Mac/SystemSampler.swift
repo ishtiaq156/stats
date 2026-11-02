@@ -1,9 +1,11 @@
 import ActivityCore
 import AppKit
 import Darwin
+import DiskArbitration
 import Foundation
 import IOKit
 import IOKit.ps
+import IOKit.storage
 
 @MainActor
 final class SystemSampler {
@@ -28,6 +30,10 @@ final class SystemSampler {
     private var hardwareFetching = false
     private var lastHardwareFetch: Date = .distantPast
     private var previousNetwork: (received: UInt64, sent: UInt64, date: Date)?
+    private let diskReader = DiskSensorReader()
+    private var diskFetching = false
+    private var lastDiskFetch: Date = .distantPast
+    private var cachedDiskDetails: DiskDetails?
 
     // Hardware identity and icon are stable for the lifetime of the companion process.
     // Keep the expensive system_profiler invocation and PNG rendering to one fetch.
@@ -98,6 +104,7 @@ final class SystemSampler {
         refreshRAMProcessesIfNeeded(at: date)
         let memory = memoryUsage()
         let disk = diskUsage()
+        refreshDiskIfNeeded(at: date)
         let network = networkRates(at: date)
         let battery = batteryStatus()
 
@@ -114,7 +121,8 @@ final class SystemSampler {
             batteryFraction: battery?.fraction,
             isCharging: battery?.charging,
             cpuDetails: cpu.details,
-            ramDetails: memory?.details
+            ramDetails: memory?.details,
+            diskDetails: cachedDiskDetails
         )
     }
 
@@ -454,6 +462,23 @@ final class SystemSampler {
         return (UInt64(max(0, free)), UInt64(max(0, total)))
     }
 
+    // Disk Arbitration, driver counters and process enumeration can briefly
+    // block (especially for external volumes). Fetch off the UI sampling timer.
+    private func refreshDiskIfNeeded(at date: Date) {
+        guard !diskFetching, date.timeIntervalSince(lastDiskFetch) >= 4 else { return }
+        diskFetching = true
+        lastDiskFetch = date
+        Task.detached(priority: .utility) { [weak self, reader = diskReader] in
+            let details = reader.read()
+            await self?.receivedDisk(details)
+        }
+    }
+
+    private func receivedDisk(_ details: DiskDetails) {
+        cachedDiskDetails = details
+        diskFetching = false
+    }
+
     private func networkRates(at date: Date) -> (received: Double, sent: Double)? {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0 else { return nil }
@@ -495,6 +520,312 @@ final class SystemSampler {
             return (min(1, Double(current) / Double(maximum)), charging)
         }
         return nil
+    }
+}
+
+/// Samples kernel disk and process counters from a background task. The lock
+/// protects the previous measurements if sampling is ever called concurrently.
+private final class DiskSensorReader: @unchecked Sendable {
+    private struct CounterSample {
+        let read: UInt64?
+        let written: UInt64?
+        let time: TimeInterval
+    }
+
+    private struct DeviceActivity {
+        let read: UInt64?
+        let written: UInt64?
+        let readRate: Double?
+        let writeRate: Double?
+    }
+
+    private struct ProcessSample {
+        let start: UInt64
+        let read: UInt64
+        let written: UInt64
+        let time: TimeInterval
+    }
+
+    private let lock = NSLock()
+    private var deviceSamples: [UInt64: CounterSample] = [:]
+    private var processSamples: [pid_t: ProcessSample] = [:]
+    private var smartCache: [String: (until: TimeInterval, value: DiskSMART?)] = [:]
+
+    func read() -> DiskDetails {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let time = ProcessInfo.processInfo.systemUptime
+        let session = DASessionCreate(kCFAllocatorDefault)
+        let keys: [URLResourceKey] = [.volumeNameKey, .volumeUUIDStringKey]
+        let mounts = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+        // Include the startup volume even if the OS omits it from visible mounts.
+        var paths: [String: URL] = ["/": URL(fileURLWithPath: "/", isDirectory: true)]
+        for url in mounts {
+            let path = url.standardizedFileURL.path
+            guard path == "/" || (path.hasPrefix("/Volumes/") &&
+                                   !path.dropFirst("/Volumes/".count).contains("/")) else { continue }
+            // Recovery is a hidden OS volume on some macOS releases.
+            guard path != "/Volumes/Recovery" else { continue }
+            paths[path] = url
+        }
+
+        var activeDrivers = Set<UInt64>()
+        var activities: [UInt64: DeviceActivity] = [:]
+        var volumes: [DiskVolume] = []
+        for (path, url) in paths.sorted(by: { $0.key == "/" || ($1.key != "/" && $0.key < $1.key) }) {
+            let disk = session.flatMap { DADiskCreateFromVolumePath(kCFAllocatorDefault, $0, url as CFURL) }
+            let description = disk.flatMap { DADiskCopyDescription($0) as? [String: Any] } ?? [:]
+            let bsdName = disk.flatMap { DADiskGetBSDName($0).map { String(cString: $0) } }
+            let fs = fileSystem(path)
+            let resources = try? url.resourceValues(forKeys: Set(keys + [
+                .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey
+            ]))
+            let uuid = resources?.volumeUUIDString?.lowercased()
+            let id = uuid.map { "volume:\($0)" } ?? "mount:\(bsdName ?? path):\(path)"
+            let name = resources?.volumeName ?? (path == "/" ? "Macintosh HD" : url.lastPathComponent)
+            let fileSystemName = description[kDADiskDescriptionVolumeKindKey as String] as? String ?? fs?.kind
+            let connection = description[kDADiskDescriptionDeviceProtocolKey as String] as? String
+            let total = resources?.volumeTotalCapacity.map { UInt64(max(0, $0)) } ?? fs?.total
+            let free = resources?.volumeAvailableCapacityForImportantUsage.map { UInt64(max(0, $0)) } ?? fs?.free
+
+            var activity: DeviceActivity?
+            if let disk {
+                let media = DADiskCopyIOMedia(disk)
+                if media != 0 {
+                    if let driver = Self.blockDriver(above: media) {
+                        var entryID: UInt64 = 0
+                        if IORegistryEntryGetRegistryEntryID(driver, &entryID) == KERN_SUCCESS {
+                            activeDrivers.insert(entryID)
+                            if let known = activities[entryID] {
+                                activity = known
+                            } else {
+                                let sampled = readDriver(driver, id: entryID, at: time)
+                                activities[entryID] = sampled
+                                activity = sampled
+                            }
+                        }
+                        IOObjectRelease(driver)
+                    }
+                    IOObjectRelease(media)
+                }
+            }
+
+            volumes.append(DiskVolume(
+                id: id, name: name, mountPath: path, bsdName: bsdName,
+                fileSystem: fileSystemName, connectionType: connection,
+                totalBytes: total, freeBytes: free,
+                readBytesPerSecond: activity?.readRate,
+                writeBytesPerSecond: activity?.writeRate,
+                totalReadBytes: activity?.read, totalWrittenBytes: activity?.written,
+                smart: smartStatus(for: path, cacheID: id, at: time)
+            ))
+        }
+        deviceSamples = deviceSamples.filter { activeDrivers.contains($0.key) }
+        let presentVolumes = Set(volumes.map(\.id))
+        smartCache = smartCache.filter { presentVolumes.contains($0.key) }
+        return DiskDetails(volumes: volumes, topProcesses: readTopProcesses(at: time))
+    }
+
+    private func fileSystem(_ path: String) -> (kind: String, total: UInt64, free: UInt64)? {
+        var info = statfs()
+        guard statfs(path, &info) == 0 else { return nil }
+        let kind = withUnsafeBytes(of: info.f_fstypename) { buffer in
+            String(cString: buffer.bindMemory(to: CChar.self).baseAddress!)
+        }
+        let blockSize = UInt64(info.f_bsize)
+        let (total, totalOverflow) = UInt64(info.f_blocks).multipliedReportingOverflow(by: blockSize)
+        let (free, freeOverflow) = UInt64(info.f_bavail).multipliedReportingOverflow(by: blockSize)
+        return (kind, totalOverflow ? 0 : total, freeOverflow ? 0 : free)
+    }
+
+    private func readDriver(_ driver: io_registry_entry_t, id: UInt64,
+                            at time: TimeInterval) -> DeviceActivity {
+        let raw = IORegistryEntryCreateCFProperty(driver,
+                     kIOBlockStorageDriverStatisticsKey as CFString, kCFAllocatorDefault, 0)
+        let data = raw?.takeRetainedValue() as? [String: Any] ?? [:]
+        let read = (data[kIOBlockStorageDriverStatisticsBytesReadKey as String] as? NSNumber)?.uint64Value
+        let written = (data[kIOBlockStorageDriverStatisticsBytesWrittenKey as String] as? NSNumber)?.uint64Value
+        let previous = deviceSamples[id]
+        let duration = previous.map { time - $0.time } ?? 0
+        let readRate = Self.rate(current: read, previous: previous?.read, seconds: duration)
+        let writeRate = Self.rate(current: written, previous: previous?.written, seconds: duration)
+        deviceSamples[id] = CounterSample(read: read, written: written, time: time)
+        return DeviceActivity(read: read, written: written,
+                              readRate: readRate, writeRate: writeRate)
+    }
+
+    private static func rate(current: UInt64?, previous: UInt64?,
+                             seconds: TimeInterval) -> Double? {
+        guard let current, let previous, current >= previous,
+              seconds > 0, seconds.isFinite else { return nil }
+        return Double(current - previous) / seconds
+    }
+
+    /// Search IOService ancestors for the storage driver responsible for this
+    /// media; APFS containers can have multiple parent layers.
+    private static func blockDriver(above media: io_registry_entry_t) -> io_registry_entry_t? {
+        IOObjectRetain(media)
+        var entries = [media]
+        defer { entries.forEach { IOObjectRelease($0) } }
+        var visited = Set<UInt64>()
+        var found: io_registry_entry_t?
+        var index = 0
+        while index < entries.count && visited.count < 256 {
+            let entry = entries[index]
+            index += 1
+            var id: UInt64 = 0
+            guard IORegistryEntryGetRegistryEntryID(entry, &id) == KERN_SUCCESS else { continue }
+            guard visited.insert(id).inserted else { continue }
+            if IOObjectConformsTo(entry, kIOBlockStorageDriverClass) != 0 {
+                if let found, found != entry { return nil }
+                found = entry
+                continue
+            }
+            var parents: io_iterator_t = 0
+            guard IORegistryEntryGetParentIterator(entry, kIOServicePlane, &parents) == KERN_SUCCESS else { continue }
+            var parent = IOIteratorNext(parents)
+            while parent != 0 {
+                entries.append(parent)
+                parent = IOIteratorNext(parents)
+            }
+            IOObjectRelease(parents)
+        }
+        guard let found else { return nil }
+        IOObjectRetain(found)
+        return found
+    }
+
+    /// diskutil exposes some NVMe SMART counters directly for mounted disks.
+    /// These keys are explicitly documented by macOS as device-dependent; each
+    /// field remains nil when absent, unrecognized, or outside numeric range.
+    private func smartStatus(for mountPath: String, cacheID: String,
+                             at time: TimeInterval) -> DiskSMART? {
+        if let cached = smartCache[cacheID], cached.until > time { return cached.value }
+        guard let info = Self.diskInfo(mountPath) else {
+            smartCache[cacheID] = (time + 90, nil)
+            return nil
+        }
+        let status = (info["SMARTStatus"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var values = info["SMARTDeviceSpecificKeysMayVaryNotGuaranteed"] as? [String: Any] ?? [:]
+        // Some APFS volumes expose SMART only on their physical store. If a
+        // volume resolves to exactly one store, query that physical device.
+        if values.isEmpty,
+           let stores = info["APFSPhysicalStores"] as? [[String: Any]], stores.count == 1,
+           let partition = stores[0]["APFSPhysicalStore"] as? String,
+           let match = partition.range(of: #"^disk[0-9]+"#, options: .regularExpression),
+           let physical = Self.diskInfo(String(partition[match])) {
+            values = physical["SMARTDeviceSpecificKeysMayVaryNotGuaranteed"] as? [String: Any] ?? [:]
+        }
+
+        func number(_ key: String) -> UInt64? {
+            guard let value = values[key] as? NSNumber else { return nil }
+            return UInt64(value.stringValue)
+        }
+        // NVMe SMART counters can occupy two 64-bit words. Only convert when
+        // the value fits UInt64; data units represent 512,000 bytes each.
+        func counter(_ key: String) -> UInt64? {
+            guard let lower = number("\(key)_0"), (number("\(key)_1") ?? 0) == 0 else { return nil }
+            return lower
+        }
+        func dataBytes(_ key: String) -> UInt64? {
+            guard let value = counter(key) else { return nil }
+            let product = value.multipliedReportingOverflow(by: 512_000)
+            return product.overflow ? nil : product.partialValue
+        }
+        let temperature: Double? = {
+            guard let kelvin = number("TEMPERATURE"), (200...500).contains(kelvin) else { return nil }
+            return Double(kelvin) - 273.15
+        }()
+        let health: Double? = {
+            guard let used = number("PERCENTAGE_USED") else { return nil }
+            return max(0, 100 - Double(used))
+        }()
+        let spare: Double? = {
+            guard let value = number("AVAILABLE_SPARE"), value <= 100 else { return nil }
+            return Double(value)
+        }()
+        let warning = number("CRITICAL_WARNING").map { "0x" + String($0, radix: 16, uppercase: true) }
+        let rawRead = dataBytes("DATA_UNITS_READ")
+        let rawWritten = dataBytes("DATA_UNITS_WRITTEN")
+        let cycles = counter("POWER_CYCLES")
+        let hours = counter("POWER_ON_HOURS")
+        let smart: DiskSMART? = {
+            guard status != nil || temperature != nil || health != nil || spare != nil ||
+                    warning != nil || rawRead != nil || rawWritten != nil ||
+                    cycles != nil || hours != nil else { return nil }
+            return DiskSMART(totalReadBytes: rawRead, totalWrittenBytes: rawWritten,
+                             temperatureCelsius: temperature, healthPercent: health,
+                             powerCycles: cycles, powerOnHours: hours,
+                             criticalWarning: warning, availableSparePercent: spare,
+                             status: status)
+        }()
+        smartCache[cacheID] = (time + 90, smart)
+        return smart
+    }
+
+    private static func diskInfo(_ path: String) -> [String: Any]? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+        task.arguments = ["info", "-plist", path]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        guard (try? task.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return nil }
+        return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+    }
+
+    private func readTopProcesses(at time: TimeInterval) -> [DiskProcess]? {
+        // proc_pid_rusage returns kernel-measured cumulative disk I/O per PID.
+        // The second sample produces rates; inaccessible PIDs are omitted.
+        let requested = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard requested > 0 else { return nil }
+        var pids = [pid_t](repeating: 0, count: Int(requested) / MemoryLayout<pid_t>.stride + 256)
+        let bytes = pids.withUnsafeMutableBytes {
+            proc_listpids(UInt32(PROC_ALL_PIDS), 0, $0.baseAddress, Int32($0.count))
+        }
+        guard bytes > 0 else { return nil }
+        var next: [pid_t: ProcessSample] = [:]
+        var activity: [(pid: pid_t, readRate: Double, writeRate: Double)] = []
+        for pid in pids.prefix(Int(bytes) / MemoryLayout<pid_t>.stride) where pid > 0 {
+            var usage = rusage_info_current()
+            let result = withUnsafeMutablePointer(to: &usage) {
+                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                    proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0)
+                }
+            }
+            guard result == 0 else { continue }
+            let now = ProcessSample(start: usage.ri_proc_start_abstime,
+                                    read: usage.ri_diskio_bytesread,
+                                    written: usage.ri_diskio_byteswritten, time: time)
+            next[pid] = now
+            guard let old = processSamples[pid], old.start == now.start else { continue }
+            guard let readRate = Self.rate(current: now.read, previous: old.read, seconds: time - old.time),
+                  let writeRate = Self.rate(current: now.written, previous: old.written, seconds: time - old.time),
+                  readRate > 0 || writeRate > 0 else { continue }
+            activity.append((pid, readRate, writeRate))
+        }
+        let hasBaseline = !processSamples.isEmpty
+        processSamples = next
+        guard hasBaseline else { return nil }
+        return activity.sorted {
+            let lhs = max($0.readRate, $0.writeRate)
+            let rhs = max($1.readRate, $1.writeRate)
+            return lhs == rhs ? $0.pid < $1.pid : lhs > rhs
+        }.prefix(8).map { item in
+            var nameBuffer = [CChar](repeating: 0, count: 256)
+            let length = proc_name(item.pid, &nameBuffer, UInt32(nameBuffer.count))
+            let executable = length > 0 ? String(decoding: nameBuffer.prefix(while: { $0 != 0 })
+                                                      .map { UInt8(bitPattern: $0) }, as: UTF8.self) : "PID \(item.pid)"
+            let name = NSRunningApplication(processIdentifier: item.pid)?.localizedName ?? executable
+            return DiskProcess(pid: Int(item.pid), name: name,
+                               readBytesPerSecond: item.readRate,
+                               writeBytesPerSecond: item.writeRate)
+        }
     }
 }
 

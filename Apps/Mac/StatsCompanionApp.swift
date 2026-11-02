@@ -36,7 +36,7 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var dockVisible = false
     @Published var settingsPage: CompanionSettingsPage = .home
     @Published var visibilityError: String?
-    private var recentSnapshots: [MetricSnapshot]
+    private var recentSnapshots = MetricHistoryBuffer()
     private let sampler = SystemSampler()
     private var timer: Timer?
     private var server: MetricServer?
@@ -50,7 +50,7 @@ final class StatsCompanionModel: ObservableObject {
         SecItemDelete(oldKey as CFDictionary)
         let first = sampler.sample()
         snapshot = first
-        recentSnapshots = [first.withoutCPUProcesses()]
+        recentSnapshots.append(first)
         let defaults = UserDefaults.standard
         dockVisible = defaults.bool(forKey: "StatsCompanion.showDock")
         menuBarVisible = defaults.object(forKey: "StatsCompanion.showMenuBar") as? Bool ?? true
@@ -70,10 +70,7 @@ final class StatsCompanionModel: ObservableObject {
 
     func refresh() {
         snapshot = sampler.sample()
-        recentSnapshots.append(snapshot.withoutCPUProcesses())
-        if recentSnapshots.count > 900 {
-            recentSnapshots.removeFirst(recentSnapshots.count - 900)
-        }
+        recentSnapshots.append(snapshot)
     }
 
     func startPairing() {
@@ -210,7 +207,7 @@ final class StatsCompanionModel: ObservableObject {
         MetricServer(snapshot: { [weak self] in
             self?.snapshot ?? MetricSnapshot(machineName: "Mac")
         }, history: { [weak self] in
-            self?.recentSnapshots ?? []
+            self?.recentSnapshots.snapshots ?? []
         }, about: {
             SystemSampler.about()
         }, onPort: { [weak self] port in

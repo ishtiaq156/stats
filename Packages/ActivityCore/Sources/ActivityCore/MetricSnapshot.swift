@@ -18,6 +18,7 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
     // Optional so existing macOS companions and saved history remain decodable.
     public let cpuDetails: CPUDetails?
     public let ramDetails: RAMDetails?
+    public let diskDetails: DiskDetails?
 
     public init(
         machineName: String,
@@ -32,7 +33,8 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         batteryFraction: Double? = nil,
         isCharging: Bool? = nil,
         cpuDetails: CPUDetails? = nil,
-        ramDetails: RAMDetails? = nil
+        ramDetails: RAMDetails? = nil,
+        diskDetails: DiskDetails? = nil
     ) {
         self.version = Self.protocolVersion
         self.machineName = machineName
@@ -48,10 +50,12 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         self.isCharging = isCharging
         self.cpuDetails = cpuDetails
         self.ramDetails = ramDetails
+        self.diskDetails = diskDetails
     }
 
-    /// Keep history compact: retain CPU summaries but discard RAM details and
-    /// momentary CPU process rankings. Aggregate RAM used/total remains available.
+    /// Keep history compact. The CPU and RAM history charts use only aggregate
+    /// fractions/bytes; per-volume disk history uses IDs and rates. The live
+    /// snapshot still supplies full CPU, RAM, disk, and process details.
     public func withoutCPUProcesses() -> MetricSnapshot {
         MetricSnapshot(machineName: machineName, timestamp: timestamp, cpuFraction: cpuFraction,
                        memoryUsedBytes: memoryUsedBytes, memoryTotalBytes: memoryTotalBytes,
@@ -59,7 +63,172 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
                        networkReceivedBytesPerSecond: networkReceivedBytesPerSecond,
                        networkSentBytesPerSecond: networkSentBytesPerSecond,
                        batteryFraction: batteryFraction, isCharging: isCharging,
-                       cpuDetails: cpuDetails?.withoutProcesses())
+                       diskDetails: diskDetails?.withoutProcesses())
+    }
+}
+
+public struct DiskProcess: Codable, Sendable, Equatable, Identifiable {
+    public let pid: Int
+    public let name: String
+    public let readBytesPerSecond: Double?
+    public let writeBytesPerSecond: Double?
+    public var id: Int { pid }
+
+    public init(pid: Int, name: String, readBytesPerSecond: Double? = nil,
+                writeBytesPerSecond: Double? = nil) {
+        self.pid = pid
+        self.name = name
+        self.readBytesPerSecond = readBytesPerSecond
+        self.writeBytesPerSecond = writeBytesPerSecond
+    }
+}
+
+/// Drive-provided SMART telemetry. A verified SMART status does not imply
+/// measured health percentage, zero critical warnings, or an endurance reading.
+public struct DiskSMART: Codable, Sendable, Equatable {
+    public let totalReadBytes: UInt64?
+    public let totalWrittenBytes: UInt64?
+    public let temperatureCelsius: Double?
+    public let healthPercent: Double?
+    public let powerCycles: UInt64?
+    public let powerOnHours: UInt64?
+    public let criticalWarning: String?
+    public let availableSparePercent: Double?
+    public let status: String?
+
+    public init(totalReadBytes: UInt64? = nil, totalWrittenBytes: UInt64? = nil,
+                temperatureCelsius: Double? = nil, healthPercent: Double? = nil,
+                powerCycles: UInt64? = nil, powerOnHours: UInt64? = nil,
+                criticalWarning: String? = nil, availableSparePercent: Double? = nil,
+                status: String? = nil) {
+        self.totalReadBytes = totalReadBytes
+        self.totalWrittenBytes = totalWrittenBytes
+        self.temperatureCelsius = temperatureCelsius
+        self.healthPercent = healthPercent
+        self.powerCycles = powerCycles
+        self.powerOnHours = powerOnHours
+        self.criticalWarning = criticalWarning
+        self.availableSparePercent = availableSparePercent
+        self.status = status
+    }
+}
+
+public struct DiskVolume: Codable, Sendable, Equatable, Identifiable {
+    /// Stable volume identifier (prefer filesystem UUID, else mount device/path).
+    public let id: String
+    public let name: String
+    public let mountPath: String
+    public let bsdName: String?
+    public let fileSystem: String?
+    public let connectionType: String?
+    public let totalBytes: UInt64?
+    public let freeBytes: UInt64?
+    /// Physical block-device activity; APFS volumes sharing a device may share rates.
+    public let readBytesPerSecond: Double?
+    public let writeBytesPerSecond: Double?
+    public let totalReadBytes: UInt64?
+    public let totalWrittenBytes: UInt64?
+    public let smart: DiskSMART?
+
+    public init(id: String, name: String, mountPath: String,
+                bsdName: String? = nil, fileSystem: String? = nil,
+                connectionType: String? = nil, totalBytes: UInt64? = nil,
+                freeBytes: UInt64? = nil, readBytesPerSecond: Double? = nil,
+                writeBytesPerSecond: Double? = nil, totalReadBytes: UInt64? = nil,
+                totalWrittenBytes: UInt64? = nil, smart: DiskSMART? = nil) {
+        self.id = id
+        self.name = name
+        self.mountPath = mountPath
+        self.bsdName = bsdName
+        self.fileSystem = fileSystem
+        self.connectionType = connectionType
+        self.totalBytes = totalBytes
+        self.freeBytes = freeBytes
+        self.readBytesPerSecond = readBytesPerSecond
+        self.writeBytesPerSecond = writeBytesPerSecond
+        self.totalReadBytes = totalReadBytes
+        self.totalWrittenBytes = totalWrittenBytes
+        self.smart = smart
+    }
+
+    /// Only data needed for historical per-volume rate charts.
+    public func withoutMetadata() -> DiskVolume {
+        // Historical records are joined to live volume metadata by `id`.
+        // Remove potentially long volume names and mount paths from 900 samples.
+        DiskVolume(id: id, name: "", mountPath: "",
+                   readBytesPerSecond: readBytesPerSecond,
+                   writeBytesPerSecond: writeBytesPerSecond)
+    }
+}
+
+public struct DiskDetails: Codable, Sendable, Equatable {
+    public let volumes: [DiskVolume]
+    public let topProcesses: [DiskProcess]?
+
+    public init(volumes: [DiskVolume], topProcesses: [DiskProcess]? = nil) {
+        self.volumes = volumes
+        self.topProcesses = topProcesses
+    }
+
+    /// A bounded list is essential for the 900-sample encrypted history.
+    public func withoutProcesses() -> DiskDetails {
+        DiskDetails(volumes: Array(volumes.prefix(4)).map { $0.withoutMetadata() })
+    }
+}
+
+/// Preserves a 900-sample time window and reduces the wire response only when
+/// required by the encrypted packet limit. Historical rates remain per-volume.
+public struct MetricHistoryBuffer: Sendable {
+    private var stored: [MetricSnapshot] = []
+    private var individualLengths: [Int] = []
+    private var encodedArrayBytes = 2 // JSON array brackets; commas are budgeted below.
+
+    public init() {}
+
+    public var storedSampleCount: Int { stored.count }
+
+    public var snapshots: [MetricSnapshot] {
+        let budget = 950_000
+        guard encodedArrayBytes + 28 > budget else { return stored }
+        guard stored.count > 1 else {
+            return encodedArrayBytes + 28 <= budget ? stored : []
+        }
+        // Keep both ends of the 30-minute window and choose the largest
+        // evenly-spaced response that fits; do not immediately halve the
+        // sample density when only a few bytes need to be removed.
+        var lower = 2
+        var upper = stored.count
+        var best: [Int] = []
+        while lower <= upper {
+            let count = lower + (upper - lower) / 2
+            let indices = (0..<count).map { $0 * (stored.count - 1) / (count - 1) }
+            let bytes = 2 + 28 + indices.reduce(0) { $0 + individualLengths[$1] + 1 }
+            if bytes <= budget {
+                best = indices
+                lower = count + 1
+            } else {
+                upper = count - 1
+            }
+        }
+        if !best.isEmpty { return best.map { stored[$0] } }
+        // A pathological single record can exceed the entire packet budget.
+        let first = individualLengths[0]
+        let last = individualLengths[stored.count - 1]
+        if 2 + 28 + first + last + 2 <= budget { return [stored[0], stored[stored.count - 1]] }
+        return last + 2 + 28 <= budget ? [stored[stored.count - 1]] : []
+    }
+
+    public mutating func append(_ snapshot: MetricSnapshot) {
+        let compact = snapshot.withoutCPUProcesses()
+        guard let size = try? JSONEncoder().encode(compact).count else { return }
+        stored.append(compact)
+        individualLengths.append(size)
+        // One additional byte per member conservatively accounts for commas.
+        encodedArrayBytes += size + 1
+        while stored.count > 900 {
+            stored.removeFirst()
+            encodedArrayBytes -= individualLengths.removeFirst() + 1
+        }
     }
 }
 
