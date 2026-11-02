@@ -160,80 +160,128 @@ private struct AboutThisMacView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                HStack(spacing: 7) {
-                    Button { dismiss() } label: {
-                        Circle().fill(Color(red: 1, green: 0.38, blue: 0.35))
-                            .frame(width: 13, height: 13)
-                    }
-                    .accessibilityLabel("Close About This Mac")
-                    Circle().fill(Color(white: 0.88)).frame(width: 13, height: 13)
-                    Circle().fill(Color(white: 0.88)).frame(width: 13, height: 13)
-                    Spacer()
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button { dismiss() } label: {
+                    MacWindowLight(enabled: true)
+                        .frame(width: 23, height: 30)
+                        .contentShape(Rectangle())
                 }
-                .padding(.top, 24)
-
-                if let info = store.aboutInfo {
-                    if let data = info.imagePNG, let image = UIImage(data: data) {
-                        Image(uiImage: image)
-                            .resizable().scaledToFit()
-                            .frame(width: 220, height: 170)
-                            .padding(.top, 30)
-                    } else {
-                        Image(systemName: "desktopcomputer")
-                            .font(.system(size: 100, weight: .ultraLight))
-                            .frame(height: 170)
-                            .padding(.top, 30)
-                    }
-                    Text(info.modelName)
-                        .font(.system(size: 26, weight: .semibold))
-                        .padding(.top, 16)
-                    if let chip = info.chip {
-                        Text(chip.replacingOccurrences(of: "Apple ", with: ""))
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
-                            .padding(.top, 3)
-                    }
-                    VStack(spacing: 5) {
-                        aboutRow("Chip", info.chip)
-                        aboutRow("Memory", info.memory)
-                        aboutRow("Startup disk", info.startupDisk)
-                        aboutRow("Serial number", info.serialNumber)
-                        aboutRow("macOS", info.macOS)
-                    }
-                    .padding(.top, 28)
-                    Text("™ and © 1983–2026 Apple Inc.\nAll Rights Reserved.")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 36)
-                } else if let error = store.aboutError {
-                    ContentUnavailableView("About This Mac unavailable", systemImage: "desktopcomputer.trianglebadge.exclamationmark", description: Text(error))
-                        .padding(.top, 80)
-                    Button("Try Again") { store.loadAbout() }
-                        .padding(.top, 12)
-                } else {
-                    ProgressView("Loading Mac details…")
-                        .padding(.top, 160)
-                }
-                Spacer(minLength: 30)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close About This Mac")
+                MacWindowLight(enabled: false)
+                    .frame(width: 23, height: 30)
+                    .accessibilityHidden(true)
+                MacWindowLight(enabled: false)
+                    .frame(width: 23, height: 30)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: 320)
-            .frame(maxWidth: .infinity)
+            .padding(.leading, 9)
+            .padding(.top, 8)
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    if let info = store.aboutInfo {
+                        deviceImage(for: info)
+                            .frame(width: 190, height: 190)
+
+                        Text(info.modelName)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .frame(width: 258, height: 30)
+                            .padding(.top, 7)
+
+                        if let chip = info.chip {
+                            Text(chip.replacingOccurrences(of: "Apple ", with: ""))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(height: 17)
+                        }
+
+                        VStack(spacing: 3) {
+                            aboutRow("Chip", info.chip)
+                            aboutRow("Memory", info.memory)
+                            aboutRow("Startup disk", info.startupDisk)
+                            aboutRow("Serial number", info.serialNumber)
+                            aboutRow("macOS", info.macOS)
+                        }
+                        .padding(.top, 16)
+
+                        Text("™ and © 1983-2026 Apple Inc.\nAll Rights Reserved.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 32)
+                    } else if let error = store.aboutError {
+                        VStack(spacing: 16) {
+                            Image(systemName: "desktopcomputer.trianglebadge.exclamationmark")
+                                .font(.system(size: 36, weight: .light))
+                            Text(error)
+                                .font(.system(size: 13))
+                                .multilineTextAlignment(.center)
+                            Button("Try Again") { store.loadAbout() }
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 130)
+                    } else {
+                        ProgressView("Loading Mac details…")
+                            .padding(.top, 130)
+                    }
+                }
+                .frame(maxWidth: 280)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 28)
+            }
         }
-        .background(Color.white)
-        .foregroundStyle(Color.black)
+        .background(Color(uiColor: .systemBackground))
+        .presentationBackground(Color(uiColor: .systemBackground))
         .presentationDetents([.height(580), .large])
         .presentationDragIndicator(.hidden)
         .task { store.loadAbout() }
     }
 
+    @ViewBuilder
+    private func deviceImage(for info: MacAboutInfo) -> some View {
+        if let data = info.imagePNG, let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: "desktopcomputer")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(Color(white: 0.54))
+                .padding(32)
+        }
+    }
+
     private func aboutRow(_ title: String, _ value: String?) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).frame(width: 100, alignment: .trailing)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title)
+                .frame(width: 92, alignment: .trailing)
+                .foregroundStyle(.primary)
+            Text(value ?? "—")
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(.secondary)
-            Text(value ?? "—").frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .font(.system(size: 13))
+        .frame(width: 248, height: 18)
+    }
+}
+
+private struct MacWindowLight: View {
+    let enabled: Bool
+
+    var body: some View {
+        Image(enabled ? "MacWindowClose" : "MacWindowDisabled")
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 14, height: 14)
     }
 }
 

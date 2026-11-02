@@ -28,6 +28,7 @@ The Mac menu bar layout was visually accepted on October 30, 2026; the Settings 
 - [ ] Launch **Stats** without a selected Mac. The unpaired/preview state is clearly identified; the sample readings do not look like live telemetry.
 - [ ] After installing a **new build** on the iPhone, check the Home Screen icon uses the same blue chart logo as the Mac's About and Dock icons. Existing device installs do not pick up a rebuilt icon until updated.
 - [ ] **Add Mac** presents nearby discovery and a manual IP/port fallback. Pairing instructions match the actual Mac menu, and the five-digit code is easy to enter.
+- [ ] **About This Mac** opens as the original bottom sheet (not a centered window), shows the native red/gray traffic lights and macOS-like hardware typography, and dismisses with the red close button. The deferred **More Info…** control and Regulatory Certification line are not visible. Check readable colors in both system Light and Dark modes.
 - [ ] A wrong/expired code produces useful error text; retry is possible. With a correct code, the selected Mac appears and metrics update.
 - [ ] On the overview, CPU, Memory, Storage, and Network use consistent card insets, icon sizes, text hierarchy, chevrons and rounding. Units and progress bars agree with the displayed labels (notably storage used vs free).
 - [ ] Each metric card opens its own detail page; the value, unit, recent chart, row labels and time stamp are legible. Wait for two samples before assessing the network throughput and line chart.

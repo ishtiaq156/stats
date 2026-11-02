@@ -47,6 +47,7 @@ See the current health and activity of one or more Macs from an iPhone: CPU, mem
 
 - Remote access outside the LAN; choose VPN first and assess a hosted relay only if needed.
 - GPU, temperatures, fans, process list, configurable alerts, and widgets. These require separate performance, permission, and accuracy checks. iOS widgets cannot provide continuously live numbers.
+- Implement the iPhone **About This Mac → More Info…** destination fully (hardware and software details, intentional navigation and accessibility) before making its button visible. Keep the current About screen as a native bottom sheet with macOS-style controls; omit the regulatory-certification line. Support system light/dark appearance.
 - Paid Apple Developer membership only if distribution or a required capability cannot be achieved with free signing. TestFlight and App Store release require membership.
 
 ## Known constraints and decisions to validate
