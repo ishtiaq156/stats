@@ -33,52 +33,58 @@ struct PasscodeEntryView: View {
                         .disabled(isPairing)
                     }
 
-                    Text("Passcode")
-                        .font(.system(size: 34, weight: .bold))
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.top, 52)
-                    Text("Enter the 5-digit code shown on your Mac\nto link both devices")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.white.opacity(0.52))
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
+                    Spacer(minLength: 24)
 
-                    HStack(spacing: 28) {
-                        ForEach(0..<5) { index in
-                            Circle()
-                                .fill(index < code.count ? Color.white : Color.white.opacity(0.28))
-                                .frame(width: 14, height: 14)
+                    VStack(spacing: 0) {
+                        Text("Passcode")
+                            .font(.system(size: 34, weight: .bold))
+                            .accessibilityAddTraits(.isHeader)
+
+                        Text("Enter the 5-digit code shown on your Mac\nto link both devices")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.white.opacity(0.52))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 12)
+
+                        HStack(spacing: 28) {
+                            ForEach(0..<5) { index in
+                                Circle()
+                                    .fill(index < code.count ? Color.white : Color.white.opacity(0.28))
+                                    .frame(width: 14, height: 14)
+                            }
                         }
-                    }
-                    .padding(.top, 44)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(code.count) of 5 digits entered")
-                    .accessibilityHint("Long-press to paste a copied passcode")
-                    .contextMenu {
-                        Button("Paste code", systemImage: "doc.on.clipboard") { pasteCode() }
-                    }
-
-                    Group {
-                        if isPairing {
-                            ProgressView("Pairing with \(store.displayName(for: device))…")
-                                .tint(.white)
-                        } else if let errorMessage {
-                            Text(errorMessage)
-                                .foregroundStyle(.red)
-                                .multilineTextAlignment(.center)
+                        .padding(.top, 32)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(code.count) of 5 digits entered")
+                        .accessibilityHint("Long-press to paste a copied passcode")
+                        .contextMenu {
+                            Button("Paste code", systemImage: "doc.on.clipboard") { pasteCode() }
                         }
-                    }
-                    .font(.footnote)
-                    .frame(height: 48)
-                    .padding(.top, 8)
 
-                    Spacer(minLength: 20)
-                    keypad(size: keySize)
-                        .padding(.bottom, 26)
+                        Group {
+                            if isPairing {
+                                ProgressView("Pairing with \(store.displayName(for: device))…")
+                                    .tint(.white)
+                            } else if let errorMessage {
+                                Text(errorMessage)
+                                    .foregroundStyle(.red)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .font(.footnote)
+                        .frame(height: 48)
+                        .padding(.top, 8)
+
+                        keypad(size: keySize)
+                            .padding(.top, 22)
+                    }
+
+                    Spacer(minLength: 28)
                 }
                 .padding(.horizontal, 30)
                 .padding(.top, 14)
+                .padding(.bottom, 18)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: geometry.size.height)
             }
