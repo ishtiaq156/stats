@@ -68,8 +68,8 @@ private struct OverviewView: View {
                         MetricDetailView(kind: .memory, store: nearby)
                     } label: {
                         MetricCard(title: "Memory", icon: "memorychip", tint: .purple,
-                                   value: MetricFormat.bytes(displayed.memoryUsedBytes),
-                                   detail: "of \(MetricFormat.bytes(displayed.memoryTotalBytes)) used",
+                                   value: MetricFormat.ramBytes(displayed.memoryUsedBytes),
+                                   detail: "of \(MetricFormat.ramBytes(displayed.memoryTotalBytes)) used",
                                    fraction: fraction(displayed.memoryUsedBytes, displayed.memoryTotalBytes))
                     }
                 }

@@ -1,0 +1,4 @@
+// Optional local signing overrides. This file is safe to commit.
+// To avoid repeated Keychain prompts after Xcode rebuilds, configure
+// CODE_SIGN_IDENTITY and DEVELOPMENT_TEAM in MacSigning.local.xcconfig.
+#include? "MacSigning.local.xcconfig"

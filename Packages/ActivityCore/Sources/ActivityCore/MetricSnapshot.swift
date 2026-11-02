@@ -17,6 +17,7 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
     public let isCharging: Bool?
     // Optional so existing macOS companions and saved history remain decodable.
     public let cpuDetails: CPUDetails?
+    public let ramDetails: RAMDetails?
 
     public init(
         machineName: String,
@@ -30,7 +31,8 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         networkSentBytesPerSecond: Double? = nil,
         batteryFraction: Double? = nil,
         isCharging: Bool? = nil,
-        cpuDetails: CPUDetails? = nil
+        cpuDetails: CPUDetails? = nil,
+        ramDetails: RAMDetails? = nil
     ) {
         self.version = Self.protocolVersion
         self.machineName = machineName
@@ -45,9 +47,11 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         self.batteryFraction = batteryFraction
         self.isCharging = isCharging
         self.cpuDetails = cpuDetails
+        self.ramDetails = ramDetails
     }
 
-    /// Exclude momentary process rankings from the history response to keep it compact.
+    /// Keep history compact: retain CPU summaries but discard RAM details and
+    /// momentary CPU process rankings. Aggregate RAM used/total remains available.
     public func withoutCPUProcesses() -> MetricSnapshot {
         MetricSnapshot(machineName: machineName, timestamp: timestamp, cpuFraction: cpuFraction,
                        memoryUsedBytes: memoryUsedBytes, memoryTotalBytes: memoryTotalBytes,
@@ -56,6 +60,73 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
                        networkSentBytesPerSecond: networkSentBytesPerSecond,
                        batteryFraction: batteryFraction, isCharging: isCharging,
                        cpuDetails: cpuDetails?.withoutProcesses())
+    }
+}
+
+public struct RAMProcess: Codable, Sendable, Equatable, Identifiable {
+    public let pid: Int
+    public let name: String
+    /// Memory footprint shown by macOS `top`'s MEM column, in bytes.
+    public let residentBytes: UInt64
+    public var id: Int { pid }
+
+    public init(pid: Int, name: String, residentBytes: UInt64) {
+        self.pid = pid
+        self.name = name
+        self.residentBytes = residentBytes
+    }
+}
+
+/// Memory composition and virtual-memory metrics sampled on macOS.
+/// Optional fields remain absent if the source sysctl fails or is unavailable.
+public struct RAMDetails: Codable, Sendable, Equatable {
+    public let appBytes: UInt64?
+    public let wiredBytes: UInt64?
+    public let compressedBytes: UInt64?
+    public let freeBytes: UInt64?
+    public let cacheBytes: UInt64?
+    public let activeBytes: UInt64?
+    public let inactiveBytes: UInt64?
+    public let swapTotalBytes: UInt64?
+    public let swapUsedBytes: UInt64?
+    public let swapFreeBytes: UInt64?
+    /// "normal", "warning", "critical", or nil when the pressure sysctl fails.
+    public let pressureLevel: String?
+    /// Cumulative virtual-memory swap page counts since boot.
+    public let swapIns: UInt64?
+    public let swapOuts: UInt64?
+    public let topProcesses: [RAMProcess]?
+
+    public init(appBytes: UInt64? = nil, wiredBytes: UInt64? = nil,
+                compressedBytes: UInt64? = nil, freeBytes: UInt64? = nil,
+                cacheBytes: UInt64? = nil, activeBytes: UInt64? = nil,
+                inactiveBytes: UInt64? = nil, swapTotalBytes: UInt64? = nil,
+                swapUsedBytes: UInt64? = nil, swapFreeBytes: UInt64? = nil,
+                pressureLevel: String? = nil, swapIns: UInt64? = nil,
+                swapOuts: UInt64? = nil, topProcesses: [RAMProcess]? = nil) {
+        self.appBytes = appBytes
+        self.wiredBytes = wiredBytes
+        self.compressedBytes = compressedBytes
+        self.freeBytes = freeBytes
+        self.cacheBytes = cacheBytes
+        self.activeBytes = activeBytes
+        self.inactiveBytes = inactiveBytes
+        self.swapTotalBytes = swapTotalBytes
+        self.swapUsedBytes = swapUsedBytes
+        self.swapFreeBytes = swapFreeBytes
+        self.pressureLevel = pressureLevel
+        self.swapIns = swapIns
+        self.swapOuts = swapOuts
+        self.topProcesses = topProcesses
+    }
+
+    public func withoutProcesses() -> RAMDetails {
+        RAMDetails(appBytes: appBytes, wiredBytes: wiredBytes,
+                   compressedBytes: compressedBytes, freeBytes: freeBytes,
+                   cacheBytes: cacheBytes, activeBytes: activeBytes,
+                   inactiveBytes: inactiveBytes, swapTotalBytes: swapTotalBytes,
+                   swapUsedBytes: swapUsedBytes, swapFreeBytes: swapFreeBytes,
+                   pressureLevel: pressureLevel, swapIns: swapIns, swapOuts: swapOuts)
     }
 }
 
@@ -174,6 +245,13 @@ public enum MetricFormat {
     public static func bytes(_ value: UInt64?) -> String {
         guard let value else { return "—" }
         return ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
+    }
+
+    /// Display RAM in macOS-style binary units.
+    /// Disk and network size labels continue using the existing file-size format.
+    public static func ramBytes(_ value: UInt64?) -> String {
+        guard let value else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .memory)
     }
 
     public static func rate(_ value: Double?) -> String {

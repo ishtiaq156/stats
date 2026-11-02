@@ -21,6 +21,9 @@ targets:
     sources: [Apps/Phone]
     dependencies:
       - package: ActivityCore
+    configFiles:
+      Debug: Config/iOSSigning.xcconfig
+      Release: Config/iOSSigning.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ishtiaqsyed.StatsForIOS
@@ -41,6 +44,9 @@ targets:
     sources: [Apps/Mac]
     dependencies:
       - package: ActivityCore
+    configFiles:
+      Debug: Config/MacSigning.xcconfig
+      Release: Config/MacSigning.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ishtiaqsyed.StatsCompanion

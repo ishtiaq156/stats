@@ -6,4 +6,4 @@ Use Xcode 27.1 or newer and XcodeGen. Run `xcodegen generate` when source files 
 
 Commit messages follow Conventional Commits, for example `fix(network): restore discovery after wake`.
 
-Code copied or adapted from another project must retain its required license and attribution. Stats by exelban is a reference for metric collection; this repository currently contains no copied Stats source.
+Any included third-party code must retain its required copyright notices and licensing terms. Keep product interfaces, copy and implementation project-specific.

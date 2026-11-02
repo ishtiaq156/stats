@@ -16,7 +16,7 @@
 - **Local pairing:** Bonjour discovery plus manual IP/port fallback; a different encrypted credential is issued to every paired phone, which can be revoked independently.
 - **Battery data where available:** Included in the Mac's snapshot; a dedicated battery card is not yet part of the iPhone overview.
 
-The project takes inspiration from [Stats](https://github.com/exelban/stats) for metric coverage and from Hilium and Mirage for the companion experience. The UI and implementation are original; no Stats source has been copied into the project.
+The Mac companion and iPhone dashboard are designed as one cohesive local monitoring experience, with native interfaces, encrypted pairing and live system metrics.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ The project takes inspiration from [Stats](https://github.com/exelban/stats) for
 ## Get started
 
 1. Open **`StatsForIOS.xcodeproj`** in Xcode. Run the **`StatsCompanion`** scheme on your Mac and open **Stats Companion** from the menu bar.
-2. Select the **`Stats`** scheme, choose your iPhone, configure your **Personal Team** for signing, and run it. Allow **Local Network** access when prompted.
+2. Select the **`Stats`** scheme, choose your iPhone, configure your **Personal Team** for signing (see below), and run it. Allow **Local Network** access when prompted.
 3. Follow the iPhone welcome screens, then select the Mac in **Nearby Macs** and enter the **five-digit passcode** shown at the top of the Mac menu. If discovery fails, open the connection settings and expand **Connect using IP address**; click the **info icon beside Network status** in the companion's Settings and use the circular copy icon beside the local address and port, then enter the passcode.
 4. View live CPU, Memory, Storage, and Network values. Tap any card for details and recent history. After reopening the iPhone app or losing the connection, select a reachable Mac from **Nearby Macs** to return to the dashboard.
 
@@ -39,6 +39,27 @@ The passcode lasts five minutes; the **refresh** icon (to the left of Copy in bo
 
 > [!TIP]
 > Stats Companion tries TCP port **8888** first and chooses an available port if it is occupied. Use the port shown in the menu or Settings for manual pairing. For **Open at login**, install the built Mac app in Applications before enabling the setting.
+
+### Signing is local to each developer
+
+No development team, Apple account, or personal signing certificate is checked into this repository. A fresh clone builds the **Mac companion** with Xcode's default ad-hoc signature and builds the **iPhone simulator** without a developer account. Installing on a physical iPhone requires configuring your own free Personal Team and, if necessary, a bundle identifier available to that team.
+
+For developer-specific signing, create either or both of these **optional, gitignored** files:
+
+`Config/MacSigning.local.xcconfig`:
+
+```xcconfig
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+```
+
+`Config/iOSSigning.local.xcconfig`:
+
+```xcconfig
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+```
+
+Xcode reads these through the tracked `Config/MacSigning.xcconfig` and `Config/iOSSigning.xcconfig` files. **Do not commit** the `.local.xcconfig` files. Using a consistent Apple Development signature for the Mac companion helps Keychain remember the application's access to existing pairing credentials across rebuilds; an ad-hoc signature can trigger repeated **Always Allow** requests. The XcodeGen project regenerates these references automatically from `project.yml`.
 
 ## Build and test
 

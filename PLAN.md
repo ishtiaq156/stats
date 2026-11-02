@@ -20,14 +20,14 @@ See the current health and activity of one or more Macs from an iPhone: CPU, mem
 ## Architecture choices
 
 - **Native Swift/SwiftUI** for both apps; a shared Swift package for metric models, wire messages, and unit formatting.
-- **Stats as a reference for collectors**, especially CPU, disk, network, battery, and sensor edge cases. Reuse selected MIT-licensed code only where it reduces work, retaining its copyright and license notice. Keep our app and user interface distinct. Review the installed Stats app and source before choosing exact collectors.
+- **Native system metric collectors** for CPU, disk, network, battery, and sensor edge cases. Validate collection methods against macOS instrumentation. Retain required copyright and licensing notices for any third-party code included in the project.
 - **Network framework + Bonjour** for local discovery and transport. Declare local network usage and the specific Bonjour service in the iPhone app. Version 0.3 replaces the QR-delivered shared key with SPAKE2 enrollment and a distinct credential per phone. Old pairings must be repeated.
 - **Mac owns history** so the iPhone can reconnect and retrieve the last few hours without running continuously in the background. Limit storage and allow clearing it.
 - **No cloud in the first release.** The domain is reserved for a possible later website or relay; it is not needed for local viewing. A user-managed VPN such as Tailscale can be evaluated for remote viewing before operating our own service.
 
 ## UX direction
 
-- Take inspiration from Hilium and Mirage’s nearby-device discovery, clear device identity, short pairing steps, and connection feedback. Build original visuals and copy.
+- Keep nearby-device discovery, device identity, short pairing steps, and connection feedback simple and consistent. Build clear, original visuals and copy.
 - Pairing flow: **Find Mac → enter temporary code → connected overview**. Show what the companion is sharing before pairing. Keep a visible retry and manual-address path.
 - Overview: Mac name, connection state, last sample time, then four prominent cards (CPU, memory, storage, network). Tapping a card opens its chart and detail. Battery appears when applicable. Avoid presenting a stale value as live.
 - Use restrained motion and native controls; make charts legible at a glance rather than copying a desktop monitoring dashboard onto a phone.
@@ -56,7 +56,7 @@ See the current health and activity of one or more Macs from an iPhone: CPU, mem
 - Free Personal Team provisioning expires after seven days and requires rebuilding/reinstalling the iPhone app. Current Apple limits also apply to App IDs, devices, and installed apps.
 - iOS normally suspends apps in the background. The live screen updates while the app is open; background widgets/alerts are a separate design problem.
 - Decide the oldest supported iOS/macOS versions and confirm the target iPhone model before setting deployment targets. Initial assumption: iOS 17+ and macOS 14+.
-- Inspect Mirage’s pairing screens from the user’s local IPA only if public screenshots and hands-on use do not give enough detail; use observations for UX, not its code or assets.
+- Verify the pairing screens directly on device, using usability tests to refine the flow without borrowing another app's code or assets.
 
 ## Next release focus
 

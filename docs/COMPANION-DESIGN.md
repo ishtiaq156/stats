@@ -2,7 +2,7 @@
 
 Status: accepted, 30 October 2026.
 
-The Mac companion stays a menu bar app that samples activity for the iPhone. Its menu becomes a compact pairing and connection panel inspired by the supplied Hilium screenshot. The iPhone remains the place to read CPU, memory, storage, network, battery, and history. The interface and wording are original to Stats for iOS.
+The Mac companion stays a menu bar app that samples activity for the iPhone. Its menu provides compact pairing and connection controls. The iPhone remains the place to read CPU, memory, storage, network, battery, and history. The interface and wording are designed for Stats for iOS.
 
 ## Menu
 
@@ -14,7 +14,7 @@ The Mac companion stays a menu bar app that samples activity for the iPhone. Its
 
 Dividers separate pairing and status, links, login and settings, and Quit. The menu does not repeat the live metric dashboard. It uses a compact native macOS popover with hover and keyboard row highlights, VoiceOver labels, and readable text in both appearances.
 
-For the compact-menu visual pass, the status panel is 312 points wide with 13-point menu labels, 26-point action rows, tighter separators, and a 30-point passcode. These dimensions are tuned against the supplied Hilium screenshot. Hovering or keyboard-selecting an action uses macOS's selected-content blue background and selected-menu-item white text, including on its shortcut or icon. The smaller native **Open at login** switch stays unfilled on pointer hover; keyboard navigation uses a thin focus outline rather than the action-row highlight.
+The compact status panel is 312 points wide with 13-point menu labels, 26-point action rows, tight separators, and a 30-point passcode. Hovering or keyboard-selecting an action uses macOS's selected-content blue background and selected-menu-item white text, including on its shortcut or icon. The smaller native **Open at login** switch stays unfilled on pointer hover; keyboard navigation uses a thin focus outline rather than the action-row highlight.
 
 The no-device icon is vertically centered with its single-line label while the network indicator stays aligned to the first line when its status wraps. The login switch is pinned to the trailing menu inset. A small refresh icon sits beside the passcode copy action and is reachable with arrow keys.
 
@@ -24,7 +24,7 @@ The macOS Settings home is a compact, **460 × 675-point** companion panel with 
 
 The default unpaired state has no redundant "No phones paired yet" section or long manual-address row. When the Mac has an address to share, the small info icon on the network status row opens a popover with the full address and a copy action for manual iPhone pairing. **Paired phones** appears only when there are registered phones, preserving the existing individual revoke controls; its list can scroll without pushing the footer offscreen. Settings remains readable in light and dark appearances and in shorter available desktop areas.
 
-The Settings content height accounts for macOS's titlebar region to keep the whole window near Hilium's 675-point exterior height. The header starts higher and shows the live five-minute expiry beside "Passcode". **Refresh then Copy**, in that order, are adjacent circular **native glass buttons** (with normal bordered controls as a fallback on macOS 14–15); the Quit button uses secondary native glass, and Feedback & Support uses blue prominent glass. Both appear in the fixed footer. On manual or automatic passcode rotation, the old digits stay in place until the replacement and new expiry are available, preventing the brief "Generating passcode…" layout jump.
+The Settings content height accounts for macOS's titlebar region to keep the whole window near 675 points tall. The header starts higher and shows the live five-minute expiry beside "Passcode". **Refresh then Copy**, in that order, are adjacent circular **native glass buttons** (with normal bordered controls as a fallback on macOS 14–15); the Quit button uses secondary native glass, and Feedback & Support uses blue prominent glass. Both appear in the fixed footer. On manual or automatic passcode rotation, the old digits stay in place until the replacement and new expiry are available, preventing the brief "Generating passcode…" layout jump.
 
 **About Stats Companion** is its own 280 × 232-point native window, shared by the menu and Settings actions. It uses the same original blue activity-chart artwork as the macOS and iOS app icons, plus version/build information and two footer lines: "© 2026 Ishtiaq Ul Haq Syed." and "All Rights Reserved." The copyright also appears in the macOS bundle metadata. The Changelog page uses a compact header, a glass Back button and native soft scroll-edge fading, with Tab/Shift-Tab focus traversal shared across both Settings pages and the status menu.
 

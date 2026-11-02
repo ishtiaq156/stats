@@ -94,6 +94,8 @@ struct MetricDetailView: View {
     var body: some View {
         if kind == .cpu {
             CPUDetailView(store: store)
+        } else if kind == .memory {
+            RAMDetailView(store: store)
         } else {
             standardDetail
         }
@@ -181,8 +183,8 @@ struct MetricDetailView: View {
                     case .cpu:
                         row("Processor load", MetricFormat.percent(latest.cpuFraction))
                     case .memory:
-                        row("Used", MetricFormat.bytes(latest.memoryUsedBytes))
-                        row("Physical memory", MetricFormat.bytes(latest.memoryTotalBytes))
+                        row("Used", MetricFormat.ramBytes(latest.memoryUsedBytes))
+                        row("Physical memory", MetricFormat.ramBytes(latest.memoryTotalBytes))
                     case .storage:
                         row("Free", MetricFormat.bytes(latest.diskFreeBytes))
                         row("Startup volume capacity", MetricFormat.bytes(latest.diskTotalBytes))
@@ -211,7 +213,7 @@ struct MetricDetailView: View {
     private var primaryValue: String {
         switch kind {
         case .cpu: MetricFormat.percent(latest.cpuFraction)
-        case .memory: MetricFormat.bytes(latest.memoryUsedBytes)
+        case .memory: MetricFormat.ramBytes(latest.memoryUsedBytes)
         case .storage: MetricFormat.bytes(latest.diskFreeBytes)
         case .network: MetricFormat.rate(latest.networkReceivedBytesPerSecond)
         }
@@ -257,7 +259,7 @@ private struct CPUCoreGroup: Identifiable {
     var id: String { kind }
 }
 
-/// Compact, Exelban-inspired monitoring adapted to the phone's available width.
+/// Compact CPU monitoring designed for the available iPhone width.
 private struct CPUDetailView: View {
     @ObservedObject var store: NearbyMacStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -719,6 +721,462 @@ private struct CPURingGauge: View {
         .frame(width: 106, height: 106)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle)
+        .accessibilityValue(centralText)
+    }
+}
+
+private struct RAMHistoryPoint: Identifiable {
+    let date: Date
+    let fraction: Double
+    var id: Date { date }
+}
+
+private struct RAMSlice: Identifiable {
+    let name: String
+    let start: Double
+    let end: Double
+    let color: Color
+    var id: String { name }
+}
+
+/// Compact RAM detail view with live pressure, composition and process readings.
+private struct RAMDetailView: View {
+    @ObservedObject var store: NearbyMacStore
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let appColor = Color(red: 0.04, green: 0.57, blue: 0.99)
+    private let wiredColor = Color(red: 1.0, green: 0.57, blue: 0.14)
+    private let compressedColor = Color(red: 0.96, green: 0.31, blue: 0.49)
+    private let freeColor = Color.gray.opacity(0.48)
+
+    private var details: RAMDetails? { store.snapshot?.ramDetails }
+    private var total: UInt64? {
+        guard let value = store.snapshot?.memoryTotalBytes, value > 0 else { return nil }
+        return value
+    }
+    private var used: UInt64? {
+        guard let value = store.snapshot?.memoryUsedBytes,
+              let total, value <= total else { return nil }
+        return value
+    }
+    private var usedFraction: Double? {
+        guard let used, let total else { return nil }
+        return Double(used) / Double(total)
+    }
+    private var pressure: String? {
+        guard let value = details?.pressureLevel?.lowercased(),
+              ["normal", "warning", "critical"].contains(value) else { return nil }
+        return value
+    }
+    private var panelBackground: Color {
+        colorScheme == .dark ? Color(white: 0.25) : Color(uiColor: .secondarySystemGroupedBackground)
+    }
+
+    private var composition: [RAMSlice]? {
+        guard let total,
+              let app = details?.appBytes, let wired = details?.wiredBytes,
+              let compressed = details?.compressedBytes,
+              let free = details?.freeBytes else { return nil }
+        let capacity = Double(total)
+        let appShare = Double(app) / capacity
+        let wiredShare = Double(wired) / capacity
+        let compressedShare = Double(compressed) / capacity
+        let sum = appShare + wiredShare + compressedShare
+        // Segments represent real supplied categories only; reject inconsistent readings.
+        guard sum <= 1.0001,
+              let usedFraction, abs(sum - usedFraction) <= 0.05,
+              abs(sum + Double(free) / capacity - 1) <= 0.05 else { return nil }
+        return [
+            RAMSlice(name: "App", start: 0, end: appShare, color: appColor),
+            RAMSlice(name: "Wired", start: appShare, end: appShare + wiredShare, color: wiredColor),
+            RAMSlice(name: "Compressed", start: appShare + wiredShare, end: sum, color: compressedColor)
+        ]
+    }
+
+    private var history: [RAMHistoryPoint] {
+        let samples = store.history.compactMap { sample -> RAMHistoryPoint? in
+            guard let used = sample.memoryUsedBytes,
+                  let total = sample.memoryTotalBytes, total > 0, used <= total else { return nil }
+            return RAMHistoryPoint(date: sample.timestamp, fraction: Double(used) / Double(total))
+        }
+        let bucketSize = max(1, Int(ceil(Double(samples.count) / 160)))
+        guard bucketSize > 1 else { return samples }
+        var result: [RAMHistoryPoint] = []
+        result.reserveCapacity(322)
+        for start in stride(from: 0, to: samples.count, by: bucketSize) {
+            let bucket = samples[start..<min(start + bucketSize, samples.count)]
+            guard let low = bucket.min(by: { $0.fraction < $1.fraction }),
+                  let high = bucket.max(by: { $0.fraction < $1.fraction }) else { continue }
+            if low.date == high.date { result.append(low) }
+            else if low.date < high.date { result.append(contentsOf: [low, high]) }
+            else { result.append(contentsOf: [high, low]) }
+        }
+        if let last = samples.last, result.last?.date != last.date { result.append(last) }
+        return result
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                dashboard
+                sectionTitle("Usage history")
+                historyChart
+                sectionTitle("Details")
+                breakdown
+                sectionTitle("Top processes")
+                processes
+            }
+            .padding(.horizontal, 17)
+            .padding(.top, 19)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 540)
+            .background(panelBackground, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("RAM")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var dashboard: some View {
+        VStack(spacing: 11) {
+            HStack(spacing: 7) {
+                Image(systemName: "memorychip")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Text(store.selectedDisplayName ?? "Mac")
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Circle()
+                    .fill(store.selectedReachable ? Color.green : Color.secondary)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(store.selectedReachable ? "Connected" : "Offline")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                VStack(spacing: 4) {
+                    RAMPressureGauge(status: pressure)
+                        .frame(height: 106, alignment: .bottom)
+                    Text("Memory pressure")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(0.75)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                VStack(spacing: 4) {
+                    RAMUsageRing(usedFraction: usedFraction,
+                                 slices: composition,
+                                 appColor: appColor,
+                                 centralText: MetricFormat.percent(usedFraction))
+                    Text("Memory usage")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(0.75)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.bottom, 5)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .tracking(1.5)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityAddTraits(.isHeader)
+            Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+        }
+        .padding(.top, 19)
+        .padding(.bottom, 11)
+    }
+
+    @ViewBuilder
+    private var historyChart: some View {
+        let points = history
+        if points.count > 1 {
+            Chart(points) { point in
+                AreaMark(x: .value("Time", point.date),
+                         y: .value("Memory percentage", point.fraction * 100))
+                    .interpolationMethod(.linear)
+                    .foregroundStyle(LinearGradient(colors: [appColor.opacity(0.48), appColor.opacity(0.10)],
+                                                    startPoint: .top, endPoint: .bottom))
+                LineMark(x: .value("Time", point.date),
+                         y: .value("Memory percentage", point.fraction * 100))
+                    .interpolationMethod(.linear)
+                    .lineStyle(StrokeStyle(lineWidth: 1.6))
+                    .foregroundStyle(appColor)
+            }
+            .chartYScale(domain: 0...100)
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+            .chartLegend(.hidden)
+            .chartPlotStyle { plot in
+                plot.background(appColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .frame(height: 105)
+            .accessibilityLabel("Memory usage history")
+            .accessibilityValue("\(points.count) samples, latest \(MetricFormat.percent(points.last?.fraction))")
+        } else {
+            VStack(spacing: 5) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.title3)
+                    .foregroundStyle(appColor.opacity(0.8))
+                Text("History appears after two memory readings")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 105)
+            .background(appColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+        }
+    }
+
+    private var breakdown: some View {
+        VStack(spacing: 9) {
+            metricRow("Used", MetricFormat.ramBytes(used))
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(freeColor)
+                    if let slices = composition {
+                        ForEach(slices) { slice in
+                            Rectangle()
+                                .fill(slice.color)
+                                .frame(width: max(0, geometry.size.width * (slice.end - slice.start)))
+                                .offset(x: geometry.size.width * slice.start)
+                        }
+                    } else if let usedFraction {
+                        Rectangle()
+                            .fill(appColor)
+                            .frame(width: geometry.size.width * usedFraction)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .frame(height: 10)
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Memory composition")
+            .accessibilityValue(composition == nil ? "Detailed breakdown unavailable" : "App, wired, compressed, and free memory")
+            metricRow("App", MetricFormat.ramBytes(details?.appBytes), color: appColor)
+            metricRow("Wired", MetricFormat.ramBytes(details?.wiredBytes), color: wiredColor)
+            metricRow("Compressed", MetricFormat.ramBytes(details?.compressedBytes), color: compressedColor)
+            metricRow("Free", MetricFormat.ramBytes(details?.freeBytes), color: freeColor)
+            metricRow("Swap", MetricFormat.ramBytes(details?.swapUsedBytes))
+            if let total {
+                Text("\(MetricFormat.ramBytes(total)) physical memory")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+            }
+        }
+    }
+
+    private var processes: some View {
+        VStack(spacing: 9) {
+            HStack {
+                Text("Process")
+                Spacer(minLength: 8)
+                Text("Memory")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            if let reported = details?.topProcesses {
+                let ranked = Array(reported.sorted { $0.residentBytes > $1.residentBytes }.prefix(8))
+                if ranked.isEmpty {
+                    Text("No processes reported")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(ranked) { process in
+                        HStack(spacing: 9) {
+                            Image(systemName: "app.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
+                                .background(Color.secondary.opacity(0.10),
+                                            in: RoundedRectangle(cornerRadius: 5))
+                                .accessibilityHidden(true)
+                            if dynamicTypeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(process.name.isEmpty ? "PID \(process.pid)" : process.name)
+                                        .font(.subheadline.weight(.medium))
+                                    Text(MetricFormat.ramBytes(process.residentBytes))
+                                        .font(.caption.weight(.semibold))
+                                        .monospacedDigit()
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Text(process.name.isEmpty ? "PID \(process.pid)" : process.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                Spacer(minLength: 10)
+                                Text(MetricFormat.ramBytes(process.residentBytes))
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                            }
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(process.name.isEmpty ? "Process" : process.name), process \(process.pid)")
+                        .accessibilityValue("\(MetricFormat.ramBytes(process.residentBytes)) memory")
+                    }
+                }
+            } else {
+                Text("Per-process memory readings unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func metricRow(_ title: String, _ value: String, color: Color? = nil) -> some View {
+        HStack(spacing: 9) {
+            if let color {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: 9, height: 9)
+                    .accessibilityHidden(true)
+            }
+            Text(title)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            Spacer(minLength: 10)
+            Text(value)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .font(.subheadline)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A fixed, three-zone semicircle with an indicator on the reported pressure state.
+private struct RAMPressureGauge: View {
+    let status: String?
+
+    private let ranges: [(start: Double, end: Double, color: Color)] = [
+        (0, 0.315, .green),
+        (0.343, 0.657, .yellow),
+        (0.685, 1, .red)
+    ]
+
+    private var indicator: Double? {
+        switch status {
+        case "normal": 1.0 / 6
+        case "warning": 0.5
+        case "critical": 5.0 / 6
+        default: nil
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            ForEach(0..<ranges.count, id: \.self) { index in
+                RAMArcShape(start: ranges[index].start, end: ranges[index].end)
+                    .stroke(ranges[index].color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+            }
+            if let indicator {
+                RAMPressureNeedle(position: indicator)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+            }
+            Text(status?.capitalized ?? "—")
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(width: 118, height: 92)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Memory pressure")
+        .accessibilityValue(status?.capitalized ?? "Unavailable")
+    }
+}
+
+private struct RAMArcShape: Shape {
+    let start: Double
+    let end: Double
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min((rect.width - 12) / 2, rect.height - 24)
+        let center = CGPoint(x: rect.midX, y: rect.maxY - 18)
+        let steps = 30
+        var path = Path()
+        for index in 0...steps {
+            let fraction = start + (end - start) * Double(index) / Double(steps)
+            let angle = Double.pi * (1 + fraction)
+            let point = CGPoint(x: center.x + radius * cos(angle),
+                                y: center.y + radius * sin(angle))
+            if index == 0 { path.move(to: point) }
+            else { path.addLine(to: point) }
+        }
+        return path
+    }
+}
+
+private struct RAMPressureNeedle: Shape {
+    let position: Double
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min((rect.width - 12) / 2, rect.height - 24) - 9
+        let center = CGPoint(x: rect.midX, y: rect.maxY - 18)
+        let angle = Double.pi * (1 + position)
+        var path = Path()
+        path.move(to: center)
+        path.addLine(to: CGPoint(x: center.x + radius * cos(angle),
+                                 y: center.y + radius * sin(angle)))
+        return path
+    }
+}
+
+private struct RAMUsageRing: View {
+    let usedFraction: Double?
+    let slices: [RAMSlice]?
+    let appColor: Color
+    let centralText: String
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.gray.opacity(0.35), lineWidth: 10)
+            if let slices {
+                ForEach(slices) { slice in
+                    Circle()
+                        .trim(from: slice.start, to: slice.end)
+                        .stroke(slice.color, lineWidth: 10)
+                        .rotationEffect(.degrees(-90))
+                }
+            } else if let usedFraction {
+                Circle()
+                    .trim(from: 0, to: usedFraction)
+                    .stroke(appColor, lineWidth: 10)
+                    .rotationEffect(.degrees(-90))
+            }
+            Text(centralText)
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 14)
+        }
+        .frame(width: 106, height: 106)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Memory usage")
         .accessibilityValue(centralText)
     }
 }

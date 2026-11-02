@@ -32,6 +32,7 @@
 		0127FBCD27412EB1D6F03D5C /* CompanionUnavailableHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionUnavailableHelp.swift; sourceTree = "<group>"; };
 		0E342F8893AC7873A498F8A2 /* PasscodeEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasscodeEntryView.swift; sourceTree = "<group>"; };
 		1749FADF689752233144DA9B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1B1D42E623133CA955FF9AAE /* MacSigning.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MacSigning.xcconfig; sourceTree = "<group>"; };
 		3C7DA6C333B77D3EE333CCB0 /* MetricServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricServer.swift; sourceTree = "<group>"; };
 		4D9264B739C9F0E69406BD8A /* NearbyMacStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyMacStore.swift; sourceTree = "<group>"; };
 		4DB12CCD37017A6CF24F1D20 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -46,6 +47,7 @@
 		C1CE0F9FCA25EC12CC82A05E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C483E76106913FF006E13F1E /* StatsCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCompanionApp.swift; sourceTree = "<group>"; };
 		D65E5547A50E26C1DDF23DCD /* StatsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsApp.swift; sourceTree = "<group>"; };
+		D817299C3AFB9328A6A69808 /* iOSSigning.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = iOSSigning.xcconfig; sourceTree = "<group>"; };
 		E6C316937A3E43577F8A3C89 /* PhoneRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRegistry.swift; sourceTree = "<group>"; };
 		E74841E46E29A4BF5A3379DD /* SystemSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSampler.swift; sourceTree = "<group>"; };
 		E97BBEB5D34438C0E91700C8 /* MetricDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricDetailView.swift; sourceTree = "<group>"; };
@@ -76,11 +78,21 @@
 		327CE8C16257B8F76F459BE1 = {
 			isa = PBXGroup;
 			children = (
+				3C190E19AB31C0C4F5D8FFD3 /* Config */,
 				C1E27687865769F235D76046 /* Mac */,
 				6723CBBF3883CD9B3323A477 /* Packages */,
 				C5A14E6E97965527798539D7 /* Phone */,
 				B770D429D51532A03C7D4DC8 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		3C190E19AB31C0C4F5D8FFD3 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				D817299C3AFB9328A6A69808 /* iOSSigning.xcconfig */,
+				1B1D42E623133CA955FF9AAE /* MacSigning.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		6723CBBF3883CD9B3323A477 /* Packages */ = {
@@ -272,6 +284,7 @@
 /* Begin XCBuildConfiguration section */
 		03A078FE3C667EEE6D7703F8 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1B1D42E623133CA955FF9AAE /* MacSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
@@ -294,6 +307,7 @@
 		};
 		4CDF3C73D2A77AF05D040F88 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D817299C3AFB9328A6A69808 /* iOSSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -318,6 +332,7 @@
 		};
 		60A2DA5C4C0E2465177146FE /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D817299C3AFB9328A6A69808 /* iOSSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -342,6 +357,7 @@
 		};
 		97A2CAA331FF399E4BE3A35E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1B1D42E623133CA955FF9AAE /* MacSigning.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;

@@ -13,4 +13,5 @@ xcuserdata/
 *.cer
 .env
 .env.*
+Config/*.local.xcconfig
 Native/Spake2Bridge/target/

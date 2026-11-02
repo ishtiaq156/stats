@@ -21,6 +21,9 @@ final class SystemSampler {
     private var cachedProcesses: [CPUProcess]?
     private var processesFetching = false
     private var lastProcessesFetch: Date = .distantPast
+    private var cachedRAMProcesses: [RAMProcess]?
+    private var ramProcessesFetching = false
+    private var lastRAMProcessesFetch: Date = .distantPast
     private var cachedHardware: CPUHardwareReadings?
     private var hardwareFetching = false
     private var lastHardwareFetch: Date = .distantPast
@@ -92,6 +95,7 @@ final class SystemSampler {
     func sample() -> MetricSnapshot {
         let date = Date()
         let cpu = cpuUsage(at: date)
+        refreshRAMProcessesIfNeeded(at: date)
         let memory = memoryUsage()
         let disk = diskUsage()
         let network = networkRates(at: date)
@@ -109,7 +113,8 @@ final class SystemSampler {
             networkSentBytesPerSecond: network?.sent,
             batteryFraction: battery?.fraction,
             isCharging: battery?.charging,
-            cpuDetails: cpu.details
+            cpuDetails: cpu.details,
+            ramDetails: memory?.details
         )
     }
 
@@ -204,7 +209,7 @@ final class SystemSampler {
         return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
-    // Based on the AppleARMPE cluster-type mapping used by exelban/Stats (MIT).
+    // Interpret AppleARMPE cluster types using the device's reported CPU topology.
     // On M5/M6, P=Super, M=Performance and E=Efficiency; older Macs use P=Performance.
     private static func readCoreTopology() -> CoreTopology {
         let physical = sysctlNumber("hw.physicalcpu")
@@ -318,7 +323,72 @@ final class SystemSampler {
         })
     }
 
-    private func memoryUsage() -> (used: UInt64, total: UInt64)? {
+    // Rank RAM processes using macOS `top`'s MEM metric.
+    // The command is relatively expensive; only refresh it on a detached task.
+    private func refreshRAMProcessesIfNeeded(at date: Date) {
+        guard !ramProcessesFetching, date.timeIntervalSince(lastRAMProcessesFetch) >= 4 else { return }
+        lastRAMProcessesFetch = date
+        ramProcessesFetching = true
+        Task.detached(priority: .utility) { [weak self] in
+            let processes = Self.readTopRAMProcesses()
+            await self?.receivedRAMProcesses(processes)
+        }
+    }
+
+    private func receivedRAMProcesses(_ processes: [RAMProcess]?) {
+        cachedRAMProcesses = processes
+        ramProcessesFetching = false
+    }
+
+    nonisolated private static func readTopRAMProcesses() -> [RAMProcess]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/top")
+        process.arguments = ["-l", "1", "-o", "mem", "-n", "8", "-stats", "pid,command,mem"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+
+        let processes = text.split(separator: "\n").compactMap { line -> RAMProcess? in
+            let columns = line.split(whereSeparator: { $0.isWhitespace })
+            guard columns.count >= 3,
+                  let pid = Int(columns[0].trimmingCharacters(in: CharacterSet(charactersIn: "*"))),
+                  let memoryText = columns.last,
+                  let bytes = parseTopMemory(memoryText) else { return nil }
+            let command = columns.dropFirst().dropLast().joined(separator: " ")
+            let appName = NSRunningApplication(processIdentifier: pid_t(pid))?.localizedName
+            return RAMProcess(pid: pid, name: appName ?? command, residentBytes: bytes)
+        }
+        guard !processes.isEmpty else { return nil }
+        return Array(processes.sorted { $0.residentBytes > $1.residentBytes }.prefix(8))
+    }
+
+    nonisolated private static func parseTopMemory(_ raw: Substring) -> UInt64? {
+        let text = raw.trimmingCharacters(in: CharacterSet(charactersIn: "+-"))
+        guard let unit = text.last else { return nil }
+        let multiplier: Double
+        let magnitude: Substring
+        switch unit {
+        case "K": multiplier = 1_024
+        case "M": multiplier = 1_048_576
+        case "G": multiplier = 1_073_741_824
+        case "T": multiplier = 1_099_511_627_776
+        default:
+            guard let bytes = UInt64(text) else { return nil }
+            return bytes
+        }
+        magnitude = text.dropLast()
+        guard let number = Double(magnitude), number.isFinite, number >= 0 else { return nil }
+        let bytes = number * multiplier
+        guard bytes.isFinite, bytes < Double(UInt64.max) else { return nil }
+        return UInt64(bytes)
+    }
+
+    private func memoryUsage() -> (used: UInt64, total: UInt64, details: RAMDetails)? {
         var info = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -328,8 +398,52 @@ final class SystemSampler {
         }
         guard result == KERN_SUCCESS else { return nil }
         let page = UInt64(getpagesize())
-        let used = (UInt64(info.active_count) + UInt64(info.wire_count) + UInt64(info.compressor_page_count)) * page
-        return (min(used, ProcessInfo.processInfo.physicalMemory), ProcessInfo.processInfo.physicalMemory)
+        let total = ProcessInfo.processInfo.physicalMemory
+        let active = UInt64(info.active_count) * page
+        let inactive = UInt64(info.inactive_count) * page
+        let speculative = UInt64(info.speculative_count) * page
+        let wired = UInt64(info.wire_count) * page
+        let compressed = UInt64(info.compressor_page_count) * page
+        let cache = (UInt64(info.purgeable_count) + UInt64(info.external_page_count)) * page
+
+        // Exclude purgeable and file-backed external pages from accounted memory.
+        let accounted = active + inactive + speculative + wired + compressed
+        let usedFromPages = accounted >= cache ? accounted - cache : 0
+        // Inconsistent kernel counters must not produce a negative App segment
+        // or a breakdown that exceeds the physical used/total figures.
+        let used = min(total, max(usedFromPages, wired + compressed))
+        let composedWired = min(wired, used)
+        let composedCompressed = min(compressed, used - composedWired)
+        let app = used - composedWired - composedCompressed
+
+        var rawPressure: Int32 = 0
+        var pressureSize = MemoryLayout<Int32>.size
+        let pressure: String? = {
+            guard sysctlbyname("kern.memorystatus_vm_pressure_level", &rawPressure,
+                               &pressureSize, nil, 0) == 0 else { return nil }
+            switch rawPressure {
+            case 1: return "normal"
+            case 2: return "warning"
+            case 4: return "critical"
+            default: return nil
+            }
+        }()
+
+        var swap = xsw_usage()
+        var swapSize = MemoryLayout<xsw_usage>.size
+        let hasSwap = sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0
+        let details = RAMDetails(
+            appBytes: app, wiredBytes: composedWired, compressedBytes: composedCompressed,
+            freeBytes: total - used, cacheBytes: cache,
+            activeBytes: active, inactiveBytes: inactive,
+            swapTotalBytes: hasSwap ? swap.xsu_total : nil,
+            swapUsedBytes: hasSwap ? swap.xsu_used : nil,
+            swapFreeBytes: hasSwap ? swap.xsu_avail : nil,
+            pressureLevel: pressure,
+            swapIns: UInt64(info.swapins), swapOuts: UInt64(info.swapouts),
+            topProcesses: cachedRAMProcesses
+        )
+        return (used, total, details)
     }
 
     private func diskUsage() -> (free: UInt64, total: UInt64)? {
@@ -414,8 +528,7 @@ private final class CPUHardwareSensorReader: @unchecked Sendable {
 }
 
 // Read-only AppleSMC access works without the privileged fan-control helper.
-// SMC's key-info and read-byte commands follow the IOKit ABI used by
-// Serhiy Mytrovtsiy's MIT-licensed Stats project (SMC/smc.swift).
+// SMC key-info and read-byte commands use the IOKit SMC ABI.
 private final class CPUAppleSMC {
     private struct Version {
         var major: UInt8 = 0
@@ -633,10 +746,9 @@ private final class CPUIOReport {
               let contents = difference as? [String: Any],
               let items = contents["IOReportChannels"] as? NSArray else { return nil }
 
-        // Match Exelban Stats' definition of "All cores": first calculate the
-        // active-state average for EACH logical core, then average equally across
-        // the cores of a cluster, and finally across all measured cores. Weighting
-        // raw residency ticks across cores instead overrepresents busy cores.
+        // Calculate the active-state clock for each logical core, then average
+        // across the cores of each cluster and across all observed cores.
+        // Weighting raw residency ticks across cores overrepresents busy cores.
         var frequencySum = [Double](repeating: 0, count: 3)
         var detected = [Int](repeating: 0, count: 3)
         let channelsList = items as CFArray
@@ -669,7 +781,7 @@ private final class CPUIOReport {
                 activeTicks += Double(ticks)
                 weightedTicks += Double(ticks) * states[index]
             }
-            // Exelban applies the lowest supported clock to fully idle cores.
+            // Use the lowest supported clock when a core is fully idle.
             let coreFrequency = activeTicks > 0
                 ? max(states[0], weightedTicks / activeTicks)
                 : states[0]

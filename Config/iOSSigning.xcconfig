@@ -1,0 +1,3 @@
+// Optional Personal Team signing for physical iPhone development.
+// Keep developer-specific settings in the ignored iOSSigning.local.xcconfig.
+#include? "iOSSigning.local.xcconfig"
