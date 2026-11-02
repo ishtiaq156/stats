@@ -205,7 +205,7 @@ private struct AboutThisMacView: View {
                             .frame(width: 190, height: 190)
 
                         Text(info.modelName)
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 23, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -214,12 +214,12 @@ private struct AboutThisMacView: View {
 
                         if let chip = info.chip {
                             Text(chip.replacingOccurrences(of: "Apple ", with: ""))
-                                .font(.system(size: 12))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.secondary)
-                                .frame(height: 17)
+                                .frame(height: 18)
                         }
 
-                        VStack(spacing: 3) {
+                        VStack(spacing: 4) {
                             aboutRow("Chip", info.chip)
                             aboutRow("Memory", info.memory)
                             aboutRow("Startup disk", info.startupDisk)
@@ -230,7 +230,7 @@ private struct AboutThisMacView: View {
 
                         Text("™ and © 1983-2026 Apple Inc.\nAll Rights Reserved.")
                             .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color.primary.opacity(0.46))
                             .multilineTextAlignment(.center)
                             .padding(.top, 32)
                     } else if let error = store.aboutError {
@@ -252,14 +252,14 @@ private struct AboutThisMacView: View {
                             .padding(44)
                             .frame(width: 190, height: 190)
                         Text("Mac")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 23, weight: .semibold))
                             .frame(height: 30)
                             .padding(.top, 7)
                         Text("—")
-                            .font(.system(size: 12))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .frame(height: 17)
-                        VStack(spacing: 3) {
+                            .frame(height: 18)
+                        VStack(spacing: 4) {
                             aboutRow("Chip", nil)
                             aboutRow("Memory", nil)
                             aboutRow("Startup disk", nil)
@@ -277,7 +277,7 @@ private struct AboutThisMacView: View {
         }
         .background(Color(uiColor: .systemBackground))
         .presentationBackground(Color(uiColor: .systemBackground))
-        .presentationDetents([.height(580), .large])
+        .presentationDetents([.height(500), .large])
         .presentationDragIndicator(.hidden)
         .task { store.loadAbout() }
     }
@@ -300,16 +300,16 @@ private struct AboutThisMacView: View {
     private func aboutRow(_ title: String, _ value: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(title)
-                .frame(width: 92, alignment: .trailing)
+                .frame(width: 100, alignment: .trailing)
                 .foregroundStyle(.primary)
             Text(value ?? "—")
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.primary.opacity(0.70))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.85)
         }
-        .font(.system(size: 13))
-        .frame(width: 248, height: 18)
+        .font(.system(size: 14))
+        .frame(width: 264, height: 20)
     }
 }
 
