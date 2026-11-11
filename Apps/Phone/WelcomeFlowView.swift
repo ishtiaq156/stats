@@ -5,7 +5,7 @@ private enum SetupStyle {
     static let background = Color(red: 0.035, green: 0.04, blue: 0.06)
     static let blue = Color(red: 0.02, green: 0.58, blue: 1)
     static let muted = Color.white.opacity(0.52)
-    static let projectURL = URL(string: "https://github.com/ishtiaq156/stats-for-ios")!
+    static let projectURL = URL(string: "https://github.com/ishtiaq156/stats")!
 }
 
 private final class BluetoothPermission: NSObject, ObservableObject, CBCentralManagerDelegate {

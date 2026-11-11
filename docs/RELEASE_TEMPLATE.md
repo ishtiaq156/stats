@@ -33,6 +33,6 @@ One or two sentences describing what this release delivers.
 
 - **Mac companion · X.Y.Z:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
 - **iPhone app · A.B.C:** `Stats-vA.B.C-iOS.ipa` (iOS 17+, arm64; unsigned, requires signing before installation).
-- See the [README](https://github.com/ishtiaq156/stats-for-ios#requirements) for installation and pairing instructions.
+- See the [README](https://github.com/ishtiaq156/stats#requirements) for installation and pairing instructions.
 
 **Full Changelog:** Link to the comparison between previous and current tags, or to the commit history for the first release.

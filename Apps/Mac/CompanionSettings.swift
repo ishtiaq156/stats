@@ -78,7 +78,7 @@ struct CompanionSettings: View {
                 model.checkForUpdates()
             }
         case .website:
-            open("https://github.com/ishtiaq156/stats-for-ios")
+            open("https://github.com/ishtiaq156/stats")
         case .about:
             showAbout()
         case .changelog:
@@ -92,7 +92,7 @@ struct CompanionSettings: View {
         case .quit:
             NSApp.terminate(nil)
         case .feedback:
-            open("https://github.com/ishtiaq156/stats-for-ios/issues/new")
+            open("https://github.com/ishtiaq156/stats/issues/new")
         case .changelogBack:
             model.settingsPage = .home
         case .revoke(let id):
@@ -187,7 +187,7 @@ struct CompanionSettings: View {
                         updateRow
                         cardDivider
                         actionRow("Website") {
-                            open("https://github.com/ishtiaq156/stats-for-ios")
+                            open("https://github.com/ishtiaq156/stats")
                         }
                         .focused($settingsFocus, equals: .website)
                         cardDivider
@@ -334,7 +334,7 @@ struct CompanionSettings: View {
             Spacer()
 
             Button("Feedback & Support") {
-                open("https://github.com/ishtiaq156/stats-for-ios/issues/new")
+                open("https://github.com/ishtiaq156/stats/issues/new")
             }
             .font(.system(size: 12, weight: .semibold))
             .companionGlassButtonStyle(prominent: true)

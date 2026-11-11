@@ -219,7 +219,7 @@ final class StatsCompanionModel: ObservableObject {
         updateState = .checking
         Task {
             do {
-                let url = URL(string: "https://api.github.com/repos/ishtiaq156/stats-for-ios/releases/latest")!
+                let url = URL(string: "https://api.github.com/repos/ishtiaq156/stats/releases/latest")!
                 var request = URLRequest(url: url)
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
                 request.setValue("StatsCompanion", forHTTPHeaderField: "User-Agent")

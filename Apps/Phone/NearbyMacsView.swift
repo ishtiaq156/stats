@@ -5,7 +5,7 @@ private enum PairingAppearance {
     static let card = Color.white.opacity(0.12)
     static let blue = Color(red: 0.02, green: 0.58, blue: 1)
     static let green = Color(red: 0.15, green: 0.82, blue: 0.35)
-    static let downloadURL = URL(string: "https://github.com/ishtiaq156/stats-for-ios")!
+    static let downloadURL = URL(string: "https://github.com/ishtiaq156/stats")!
 }
 
 struct NearbyMacsView: View {

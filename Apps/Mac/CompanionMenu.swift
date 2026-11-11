@@ -337,7 +337,7 @@ struct CompanionMenu: View {
                 model.checkForUpdates()
             }
         case .website:
-            open("https://github.com/ishtiaq156/stats-for-ios")
+            open("https://github.com/ishtiaq156/stats")
         case .about:
             CompanionAboutWindow.show()
         case .changelog:

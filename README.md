@@ -30,7 +30,7 @@ The Mac companion and iPhone dashboard are designed as one cohesive local monito
 
 ### macOS download
 
-**Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS DMG from the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases):
+**Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS DMG from the [GitHub Releases page](https://github.com/ishtiaq156/stats/releases):
 
 1. Open the DMG and drag `StatsCompanion.app` to the **Applications** shortcut.
 2. Launch Stats Companion from Applications, then open its menu bar panel. Install Stats for iPhone from the unsigned IPA described below or build it in Xcode using [Get started](#get-started).
@@ -44,7 +44,7 @@ The current build is signed with an Apple Development identity, without Develope
 
 ### iPhone download
 
-**Stats for iPhone** is available as an **unsigned IPA** on the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases). Download `Stats-v0.3.0-iOS.ipa` for the current iPhone build (**0.3.0, build 3; iOS 17+**).
+**Stats for iPhone** is available as an **unsigned IPA** on the [GitHub Releases page](https://github.com/ishtiaq156/stats/releases). Download `Stats-v0.3.0-iOS.ipa` for the current iPhone build (**0.3.0, build 3; iOS 17+**).
 
 The IPA contains only `Payload/Stats.app`. It has **no code signature or provisioning profile**, so it cannot be installed directly on a stock iPhone. Sign the IPA with your own credentials through a compatible sideloading tool (such as SideStore) before installation, or build and sign the app in Xcode using a free Personal Team. The iPhone and companion must share a reachable local network for pairing.
 
@@ -129,7 +129,7 @@ The Mac samples about every **two seconds** and holds approximately **30 minutes
 - CPU and network rates require two samples, so the first reading may be unavailable. Battery values depend on the Mac hardware.
 - Network connectivity measurements use one background ICMP echo to `1.1.1.1` roughly every ten seconds while the companion samples the primary physical network interface (including the interface beneath a VPN default route when identifiable). Reachability and latency describe that test endpoint, not every Internet destination; jitter requires multiple successful checks. Network process totals are system-wide, while main rates and cumulative traffic refer to the selected interface. Public IP addresses are not fetched from an external service. To display the connected Wi-Fi network name, select **Allow Wi-Fi network name** in the Mac companion's Settings and approve macOS Location permission. If access was denied, **Open Location Settings** takes you to the macOS permission controls. The companion does not request coordinates or track location.
 - iOS background monitoring, widgets, alerts, extra sensors, and remote access are future work.
-- Update checks currently see stable GitHub Releases only. For preview releases, check the [Releases page](https://github.com/ishtiaq156/stats-for-ios/releases) manually; automatic in-app installation is not implemented.
+- Update checks currently see stable GitHub Releases only. For preview releases, check the [Releases page](https://github.com/ishtiaq156/stats/releases) manually; automatic in-app installation is not implemented.
 - Free Personal Team signing generally requires rebuilding and reinstalling the iPhone app after seven days. TestFlight and App Store distribution require paid developer enrollment.
 - The pairing implementation needs an independent protocol review and physical-device testing before public deployment. See [security guidance](SECURITY.md).
 
