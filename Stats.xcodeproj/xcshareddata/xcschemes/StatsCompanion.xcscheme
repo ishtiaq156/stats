@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "6D7E0DA0C6EB12A7A1E4B223"
-               BuildableName = "Stats.app"
-               BlueprintName = "Stats"
-               ReferencedContainer = "container:StatsForIOS.xcodeproj">
+               BlueprintIdentifier = "9083E4026499060C25021B20"
+               BuildableName = "StatsCompanion.app"
+               BlueprintName = "StatsCompanion"
+               ReferencedContainer = "container:Stats.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,10 +32,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6D7E0DA0C6EB12A7A1E4B223"
-            BuildableName = "Stats.app"
-            BlueprintName = "Stats"
-            ReferencedContainer = "container:StatsForIOS.xcodeproj">
+            BlueprintIdentifier = "9083E4026499060C25021B20"
+            BuildableName = "StatsCompanion.app"
+            BlueprintName = "StatsCompanion"
+            ReferencedContainer = "container:Stats.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -55,10 +55,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6D7E0DA0C6EB12A7A1E4B223"
-            BuildableName = "Stats.app"
-            BlueprintName = "Stats"
-            ReferencedContainer = "container:StatsForIOS.xcodeproj">
+            BlueprintIdentifier = "9083E4026499060C25021B20"
+            BuildableName = "StatsCompanion.app"
+            BlueprintName = "StatsCompanion"
+            ReferencedContainer = "container:Stats.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -74,10 +74,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6D7E0DA0C6EB12A7A1E4B223"
-            BuildableName = "Stats.app"
-            BlueprintName = "Stats"
-            ReferencedContainer = "container:StatsForIOS.xcodeproj">
+            BlueprintIdentifier = "9083E4026499060C25021B20"
+            BuildableName = "StatsCompanion.app"
+            BlueprintName = "StatsCompanion"
+            ReferencedContainer = "container:Stats.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

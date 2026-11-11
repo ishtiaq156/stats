@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
-build_dir="/tmp/stats-ios-smoke"
+build_dir="/tmp/stats-smoke"
 mkdir -p "$build_dir"
 
 swift build --package-path "$repo_dir/Packages/ActivityCore"
@@ -13,7 +13,7 @@ swiftc -I "$module_dir" -I "$module_dir/include" \
   -Xcc -fmodule-map-file="$bridge_dir/Headers/module.modulemap" \
   "$repo_dir/Apps/Mac/MetricServer.swift" \
   "$repo_dir/Apps/Mac/PhoneRegistry.swift" \
-  "$repo_dir/Apps/Phone/PasscodePairer.swift" \
+  "$repo_dir/Apps/Mobile/PasscodePairer.swift" \
   "$repo_dir/Tests/Mac/PairingSmoke.swift" \
   "$module_dir/libActivityCore.a" \
   "$bridge_dir/libstats_spake2_macos.a" \

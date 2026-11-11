@@ -17,7 +17,7 @@ private enum IconCanvas {
 }
 
 private let imageSize = 1024
-private let phoneIcon = "Apps/Phone/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
+private let phoneIcon = "Apps/Mobile/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
 private let macIconDirectory = "Apps/Mac/Assets.xcassets/AppIcon.appiconset"
 private let brandMark = "Apps/Mac/Assets.xcassets/StatsBrandMark.imageset/StatsBrandMark.png"
 private let statusMarkDirectory = "Apps/Mac/Assets.xcassets/StatsStatusMark.imageset"
