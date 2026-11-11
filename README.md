@@ -33,7 +33,7 @@ The Mac companion and iPhone dashboard are designed as one cohesive local monito
 **Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS DMG from the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases):
 
 1. Open the DMG and drag `StatsCompanion.app` to the **Applications** shortcut.
-2. Launch Stats Companion from Applications, then open its menu bar panel. Install the Stats iPhone app from Xcode using the steps in [Get started](#get-started).
+2. Launch Stats Companion from Applications, then open its menu bar panel. Install Stats for iPhone from the unsigned IPA described below or build it in Xcode using [Get started](#get-started).
 3. Connect the Mac and iPhone to the same reachable local network. Select the Mac on your iPhone and enter the five-digit passcode from the Mac menu.
 
 This download contains the Mac companion only. Move the app to Applications **before enabling Open at login**.
@@ -41,6 +41,12 @@ This download contains the Mac companion only. Move the app to Applications **be
 The DMG includes a hidden folder with the required open-source license notices. It does not include a separate installation README.
 
 The current build is signed with an Apple Development identity, without Developer ID notarization. On Macs where Gatekeeper blocks the downloaded app, use the app-specific **Open** / **Open Anyway** control in macOS after verifying the source of the download. Do not disable Gatekeeper globally. Keep this preview on a trusted local network while protocol review and broader testing continue.
+
+### iPhone download
+
+**Stats for iPhone** is available as an **unsigned IPA** on the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases). Download `Stats-v0.3.0-iOS-unsigned.ipa` for the current iPhone build (**0.3.0, build 3; iOS 17+**).
+
+The IPA contains only `Payload/Stats.app`. It has **no code signature or provisioning profile**, so it cannot be installed directly on a stock iPhone. Sign the IPA with your own credentials through a compatible sideloading tool (such as SideStore) before installation, or build and sign the app in Xcode using a free Personal Team. The iPhone and companion must share a reachable local network for pairing.
 
 ## Get started
 

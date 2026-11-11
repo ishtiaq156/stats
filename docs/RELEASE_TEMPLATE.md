@@ -1,6 +1,7 @@
 <!--
-Reusable GitHub release body. The GitHub release title is "Stats Companion X.Y.Z";
-the tag and app version are "vX.Y.Z" and "X.Y.Z" respectively.
+Reusable GitHub release body. The tag vX.Y.Z identifies the project release.
+Mac Companion and iPhone Stats maintain independent app versions and builds;
+use each component's actual version in its asset filename and download label.
 The release status is set in GitHub (Pre-release or Latest), not in the title,
 tag, download filename, or in-app changelog. Once a version/tag is published,
 use a new version for any changed binary rather than silently replacing it.
@@ -30,7 +31,8 @@ One or two sentences describing what this release delivers.
 
 ## Download
 
-- **macOS:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
-- See the [README](https://github.com/ishtiaq156/stats-for-ios#macos-download) for requirements, installation, and pairing instructions.
+- **Mac companion · X.Y.Z:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
+- **iPhone app · A.B.C:** `Stats-vA.B.C-iOS-unsigned.ipa` (iOS 17+, arm64; requires signing before installation).
+- See the [README](https://github.com/ishtiaq156/stats-for-ios#requirements) for installation and pairing instructions.
 
 **Full Changelog:** Link to the comparison between previous and current tags, or to the commit history for the first release.
