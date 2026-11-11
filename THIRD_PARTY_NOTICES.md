@@ -1,5 +1,12 @@
 # Third-party acknowledgments
 
+## Tailscale update indicator
+
+The circular up-arrow assets in
+`Apps/Mac/Assets.xcassets/StatsUpdateAvailable.imageset` were extracted from
+the `UpdateAvailable` image resource in Tailscale for macOS 1.104.1.
+Copyright Tailscale Inc. Tailscale is not affiliated with Stats.
+
 ## Stats by Serhiy Mytrovtsiy (Exelban)
 
 CPU monitoring and presentation draw from the open-source

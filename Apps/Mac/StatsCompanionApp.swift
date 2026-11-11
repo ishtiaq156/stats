@@ -66,6 +66,10 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var pairingPending = false
     @Published private(set) var pairingLocked = false
     @Published private(set) var updateState: CompanionUpdateState = .idle
+    var hasUpdateAvailable: Bool {
+        if case .available = updateState { return true }
+        return false
+    }
     @Published var loginError: String?
     @Published var openAtLogin = SMAppService.mainApp.status == .enabled
     @Published var menuBarVisible = true
@@ -77,6 +81,8 @@ final class StatsCompanionModel: ObservableObject {
     private let sampler = SystemSampler()
     private let wifiLocationAccess = WiFiLocationAccess()
     private var timer: Timer?
+    private var updateCheckTimer: Timer?
+    private var updateCheckInFlight = false
     private var server: MetricServer?
 
     init() {
@@ -111,6 +117,12 @@ final class StatsCompanionModel: ObservableObject {
         }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
+        }
+        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkForUpdates(silent: true) }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.checkForUpdates(silent: true)
         }
     }
 
@@ -214,44 +226,53 @@ final class StatsCompanionModel: ObservableObject {
         }
     }
 
-    func checkForUpdates() {
-        guard updateState != .checking else { return }
-        updateState = .checking
+    /// Silently check at startup and every six hours, but preserve the manual
+    /// progress/feedback when a user presses Check for updates.
+    func checkForUpdates(silent: Bool = false) {
+        guard !updateCheckInFlight else { return }
+        updateCheckInFlight = true
+        let previousState = updateState
+        if !silent { updateState = .checking }
         Task {
+            defer { updateCheckInFlight = false }
             do {
-                let url = URL(string: "https://api.github.com/repos/ishtiaq156/stats/releases/latest")!
+                // The /releases/latest endpoint excludes GitHub pre-releases,
+                // including the current Stats Companion distribution.
+                let url = URL(string: "https://api.github.com/repos/ishtiaq156/stats/releases?per_page=100")!
                 var request = URLRequest(url: url)
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
                 request.setValue("StatsCompanion", forHTTPHeaderField: "User-Agent")
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let response = response as? HTTPURLResponse else {
-                    updateState = .failed("Could not check for updates")
-                    return
-                }
-                if response.statusCode == 404 {
-                    showUpToDate()
+                    updateCheckFailed("Could not check for updates", previous: previousState, silent: silent)
                     return
                 }
                 guard response.statusCode == 200 else {
-                    updateState = .failed("Update check failed (HTTP \(response.statusCode))")
+                    updateCheckFailed("Update check failed (HTTP \(response.statusCode))", previous: previousState, silent: silent)
                     return
                 }
-                struct Release: Decodable {
-                    let tag_name: String
-                    let html_url: URL
-                }
-                let release = try JSONDecoder().decode(Release.self, from: data)
                 let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-                let latest = release.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-                if latest.compare(current, options: .numeric) == .orderedDescending,
-                   release.html_url.host == "github.com" {
-                    updateState = .available(version: latest, url: release.html_url)
+                let newer = try CompanionUpdateRelease.newest(in: data, newerThan: current)
+                if let newer {
+                    updateState = .available(version: newer.version, url: newer.url)
+                } else if silent {
+                    updateState = .idle
                 } else {
                     showUpToDate()
                 }
             } catch {
-                updateState = .failed("Update check failed")
+                updateCheckFailed("Update check failed", previous: previousState, silent: silent)
             }
+        }
+    }
+
+    private func updateCheckFailed(_ message: String, previous: CompanionUpdateState, silent: Bool) {
+        // A transient connection/API failure does not invalidate an update
+        // already found by a successful check.
+        if case .available = previous {
+            updateState = previous
+        } else {
+            updateState = silent ? .idle : .failed(message)
         }
     }
 
@@ -343,12 +364,22 @@ struct StatsCompanionApp: App {
         )) {
             CompanionMenu(model: model)
         } label: {
-            Image("StatsStatusMark")
-                .resizable()
-                .interpolation(.high)
-                .renderingMode(.original)
-                .frame(width: 18, height: 18)
-                .accessibilityLabel("Stats Companion")
+            HStack(spacing: 2) {
+                Image("StatsStatusMark")
+                    .resizable()
+                    .interpolation(.high)
+                    .renderingMode(.original)
+                    .frame(width: 18, height: 18)
+                if model.hasUpdateAvailable {
+                    Image("StatsUpdateAvailable")
+                        .resizable()
+                        .interpolation(.high)
+                        .renderingMode(.original)
+                        .frame(width: 15, height: 15)
+                        .accessibilityHidden(true)
+                }
+            }
+            .accessibilityLabel(model.hasUpdateAvailable ? "Stats Companion, update available" : "Stats Companion")
         }
         .menuBarExtraStyle(.window)
         companionSettingsScene
