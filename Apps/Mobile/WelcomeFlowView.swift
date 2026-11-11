@@ -163,12 +163,20 @@ struct WelcomeFlowView: View {
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(SetupStyle.muted)
                     .padding(.top, 5)
-                Label(store.devices.isEmpty ? (searchFinished ? "No Mac detected on your network" : "Searching for Macs…") :
+                Label(store.discoveryError != nil ? "Nearby search unavailable" :
+                        store.devices.isEmpty ? (searchFinished ? "No Mac detected on your network" : "Searching for Macs…") :
                         "\(store.devices.count) Mac\(store.devices.count == 1 ? "" : "s") found nearby",
-                      systemImage: store.devices.isEmpty ? "circle.fill" : "checkmark.circle.fill")
+                      systemImage: store.discoveryError != nil ? "wifi.exclamationmark" :
+                          store.devices.isEmpty ? "circle.fill" : "checkmark.circle.fill")
                     .font(.footnote)
                     .foregroundStyle(store.devices.isEmpty ? SetupStyle.muted : Color.green)
                     .padding(.top, 9)
+                if store.discoveryError != nil {
+                    Text("You can still pair with your Mac using its local IP address and port.")
+                        .font(.footnote)
+                        .foregroundStyle(SetupStyle.muted)
+                        .multilineTextAlignment(.center)
+                }
             } else if step == 0 {
                 Text("Terms of Use · Privacy Policy")
                     .font(.footnote)
