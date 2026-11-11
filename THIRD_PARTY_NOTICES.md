@@ -2,10 +2,13 @@
 
 ## Stats by Serhiy Mytrovtsiy (Exelban)
 
-The CPU monitoring implementation and presentation are informed by the open-source
-[Stats project](https://github.com/exelban/stats), including its Mach CPU tick
-sampling, AppleARMPE core classification and CPU popup layout. The code in this
-project was adapted or independently written for its local Mac-to-iPhone protocol.
+CPU monitoring and presentation draw from the open-source
+[Stats project](https://github.com/exelban/stats), including Mach CPU tick
+sampling, AppleARMPE core classification and CPU popup layout. Network collection
+also adapts its SystemConfiguration physical-interface selection (including VPN
+fallback) and its user-initiated CoreLocation authorization pattern for CoreWLAN
+Wi-Fi names. Other collectors are integrated for this project's local
+Mac-to-iPhone snapshot protocol. App artwork and user interfaces are independent.
 
 The original Stats source is made available under the MIT License:
 

@@ -5,7 +5,7 @@
 **See your Mac's activity from your iPhone.** Stats is a native iPhone dashboard paired with a lightweight macOS menu bar companion. Both apps communicate on your local network without an account or cloud service.
 
 > [!NOTE]
-> **Early prototype.** The compact macOS menu and Settings interface have been iterated through hands-on UI feedback. Automated pairing tests pass and pairing has been exercised on a physical iPhone. Broader device testing and an independent protocol review are still needed before a public release.
+> **Early preview.** The compact macOS menu and Settings interface have been iterated through hands-on UI feedback. Automated pairing tests pass and pairing has been exercised on a physical iPhone. Broader device testing and an independent protocol review are still needed before a stable release.
 
 ## What it does
 
@@ -27,6 +27,18 @@ The Mac companion and iPhone dashboard are designed as one cohesive local monito
 | Development | Xcode 27.2+, Swift 6 language mode; XcodeGen for regenerating the project |
 | Connection | Mac and iPhone on the same reachable local network |
 | iPhone installation | Xcode signing with a free Personal Team is supported |
+
+### macOS download
+
+**Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS ZIP from the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases):
+
+1. Unzip the download and move `StatsCompanion.app` into Applications.
+2. Launch Stats Companion from Applications, then open its menu bar panel. Install the Stats iPhone app from Xcode using the steps in [Get started](#get-started).
+3. Connect the Mac and iPhone to the same reachable local network. Select the Mac on your iPhone and enter the five-digit passcode from the Mac menu.
+
+This download contains the Mac companion only. Move the app to Applications **before enabling Open at login**.
+
+The current build is signed with an Apple Development identity, without Developer ID notarization. On Macs where Gatekeeper blocks the downloaded app, use the app-specific **Open** / **Open Anyway** control in macOS after verifying the source of the download. Do not disable Gatekeeper globally. Keep this preview on a trusted local network while protocol review and broader testing continue.
 
 ## Get started
 
@@ -107,9 +119,10 @@ The Mac samples about every **two seconds** and holds approximately **30 minutes
 - Local-network access only. Bonjour may be blocked by guest Wi-Fi, firewall configuration, or iOS privacy settings; manual IP/port pairing is the fallback.
 - The Mac companion must be running in a logged-in session. Sleep stops live reporting; restart clears the in-memory history.
 - CPU and network rates require two samples, so the first reading may be unavailable. Battery values depend on the Mac hardware.
+- Network connectivity measurements use one background ICMP echo to `1.1.1.1` roughly every ten seconds while the companion samples the primary physical network interface (including the interface beneath a VPN default route when identifiable). Reachability and latency describe that test endpoint, not every Internet destination; jitter requires multiple successful checks. Network process totals are system-wide, while main rates and cumulative traffic refer to the selected interface. Public IP addresses are not fetched from an external service. To display the connected Wi-Fi network name, select **Allow Wi-Fi network name** in the Mac companion's Settings and approve macOS Location permission. If access was denied, **Open Location Settings** takes you to the macOS permission controls. The companion does not request coordinates or track location.
 - iOS background monitoring, widgets, alerts, extra sensors, and remote access are future work.
-- Update checks use GitHub Releases and open the release page; automatic in-app installation is not implemented.
+- Update checks currently see stable GitHub Releases only. For preview releases, check the [Releases page](https://github.com/ishtiaq156/stats-for-ios/releases) manually; automatic in-app installation is not implemented.
 - Free Personal Team signing generally requires rebuilding and reinstalling the iPhone app after seven days. TestFlight and App Store distribution require paid developer enrollment.
 - The pairing implementation needs an independent protocol review and physical-device testing before public deployment. See [security guidance](SECURITY.md).
 
-For the next round of UI work and verification, see the [UI test checklist](docs/UI-TEST.md), [Mac companion design](docs/COMPANION-DESIGN.md), [pairing decision](docs/adr/0001-passcode-pairing.md), and [roadmap](PLAN.md).
+For the next round of UI work and verification, see the [UI test checklist](docs/UI-TEST.md), [Mac companion design](docs/COMPANION-DESIGN.md), [pairing decision](docs/adr/0001-passcode-pairing.md), and [roadmap](PLAN.md). The [release notes template](docs/RELEASE_TEMPLATE.md) is used for GitHub releases.

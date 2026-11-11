@@ -1,5 +1,6 @@
 import ActivityCore
 import AppKit
+import CoreLocation
 import Darwin
 import ServiceManagement
 import Security
@@ -15,6 +16,41 @@ enum CompanionUpdateState: Equatable {
     case upToDate
     case available(version: String, url: URL)
     case failed(String)
+}
+
+/// Location access is opt-in. macOS uses it to authorize CoreWLAN's current
+/// network name; this coordinator never requests a position or starts updates.
+@MainActor
+final class WiFiLocationAccess: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    var authorizationChanged: ((CLAuthorizationStatus) -> Void)?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+    }
+
+    var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
+
+    func request() {
+        switch authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .denied, .restricted:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+                NSWorkspace.shared.open(url)
+            }
+        default:
+            break
+        }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.authorizationChanged?(self.authorizationStatus)
+        }
+    }
 }
 
 @MainActor
@@ -36,8 +72,10 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var dockVisible = false
     @Published var settingsPage: CompanionSettingsPage = .home
     @Published var visibilityError: String?
+    @Published private(set) var wifiLocationAuthorization: CLAuthorizationStatus = .notDetermined
     private var recentSnapshots = MetricHistoryBuffer()
     private let sampler = SystemSampler()
+    private let wifiLocationAccess = WiFiLocationAccess()
     private var timer: Timer?
     private var server: MetricServer?
 
@@ -51,6 +89,14 @@ final class StatsCompanionModel: ObservableObject {
         let first = sampler.sample()
         snapshot = first
         recentSnapshots.append(first)
+        wifiLocationAuthorization = wifiLocationAccess.authorizationStatus
+        sampler.setWiFiNameAuthorized(Self.isWiFiLocationAuthorized(wifiLocationAuthorization))
+        wifiLocationAccess.authorizationChanged = { [weak self] status in
+            guard let self else { return }
+            self.wifiLocationAuthorization = status
+            self.sampler.setWiFiNameAuthorized(Self.isWiFiLocationAuthorized(status))
+            self.refresh()
+        }
         let defaults = UserDefaults.standard
         dockVisible = defaults.bool(forKey: "StatsCompanion.showDock")
         menuBarVisible = defaults.object(forKey: "StatsCompanion.showMenuBar") as? Bool ?? true
@@ -71,6 +117,20 @@ final class StatsCompanionModel: ObservableObject {
     func refresh() {
         snapshot = sampler.sample()
         recentSnapshots.append(snapshot)
+    }
+
+    var needsWiFiLocationAccess: Bool {
+        !Self.isWiFiLocationAuthorized(wifiLocationAuthorization)
+    }
+
+    func requestWiFiLocationAccess() {
+        wifiLocationAccess.request()
+    }
+
+    private static func isWiFiLocationAuthorized(_ status: CLAuthorizationStatus) -> Bool {
+        // CoreLocation exposes the allowed state as .authorizedAlways on macOS.
+        // .authorizedWhenInUse is iOS-only in the current macOS SDK.
+        status == .authorizedAlways
     }
 
     func startPairing() {

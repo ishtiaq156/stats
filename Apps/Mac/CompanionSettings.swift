@@ -11,7 +11,7 @@ struct CompanionSettings: View {
     @FocusState private var settingsFocus: SettingsFocus?
 
     private enum SettingsFocus: Hashable {
-        case copyPasscode, refreshPasscode, connectionAddress, updates
+        case copyPasscode, refreshPasscode, connectionAddress, wifiLocation, updates
         case website, about, changelog, dock, menuBar, login
         case quit, feedback, changelogBack
         case revoke(UUID)
@@ -25,6 +25,7 @@ struct CompanionSettings: View {
             actions.append(.refreshPasscode)
         }
         if model.localAddress != nil { actions.append(.connectionAddress) }
+        if model.needsWiFiLocationAccess { actions.append(.wifiLocation) }
         switch model.updateState {
         case .idle, .available, .failed: actions.append(.updates)
         case .checking, .upToDate: break
@@ -68,6 +69,8 @@ struct CompanionSettings: View {
             copyPasscode(code)
         case .connectionAddress:
             showingConnectionAddress = true
+        case .wifiLocation:
+            model.requestWiFiLocationAccess()
         case .updates:
             if case .available(_, let url) = model.updateState {
                 NSWorkspace.shared.open(url)
@@ -166,6 +169,18 @@ struct CompanionSettings: View {
                     card {
                         networkStatusRow
                         connectionStatusRow
+                    }
+
+                    if model.needsWiFiLocationAccess {
+                        card {
+                            actionRow(model.wifiLocationAuthorization == .notDetermined
+                                      ? "Allow Wi-Fi network name" : "Open Location Settings",
+                                      symbol: "location.circle", height: 46) {
+                                model.requestWiFiLocationAccess()
+                            }
+                            .help("Location permission lets Stats Companion show the connected Wi-Fi name. No location is collected.")
+                            .focused($settingsFocus, equals: .wifiLocation)
+                        }
                     }
 
                     card {

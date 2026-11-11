@@ -13,7 +13,7 @@ public enum PairingWire {
         }
     }
 
-    public struct Enrollment: Codable {
+    public struct Enrollment: Codable, Sendable {
         public let phoneID: UUID
         public let credential: Data
 

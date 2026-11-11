@@ -2,6 +2,7 @@ import ActivityCore
 import Foundation
 import Network
 
+@MainActor
 private final class Runner {
     private let service = "com.ishtiaqsyed.StatsCompanion.smoke.\(UUID())"
     private var server: MetricServer!
@@ -16,6 +17,10 @@ private final class Runner {
         server = MetricServer(
             snapshot: { MetricSnapshot(machineName: "Pairing smoke Mac") },
             history: { [] },
+            about: {
+                MacAboutInfo(modelName: "Pairing smoke Mac", chip: nil, memory: nil,
+                             startupDisk: nil, serialNumber: nil, macOS: "Smoke", imagePNG: nil)
+            },
             onPort: { [weak self] port in self?.port = port; self?.startPairingIfReady() },
             onDiscovery: { _, _ in },
             onPhones: { [weak self] phones in
@@ -74,44 +79,70 @@ private final class Runner {
         let connection = NWConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!), using: .tcp)
         fetch = connection
         connection.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .ready:
-                do {
-                    let request = try PairingWire.authenticatedRequest("snapshot.v1", phoneID: enrollment.phoneID,
-                                                                        key: enrollment.credential)
-                    connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
-                        if let error { self.result = "Send failed: \(error)"; return }
-                        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, _ in
-                            guard let header, let length = SecurePacket.length(header) else {
-                                self.result = "Missing response header"; return
-                            }
-                            connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, _ in
-                                guard let body,
-                                      let opened = try? SecurePacket.open(body, using: enrollment.credential),
-                                      let snapshot = try? JSONDecoder().decode(MetricSnapshot.self, from: opened),
-                                      snapshot.machineName == "Pairing smoke Mac" else {
-                                    self.result = "Invalid authenticated snapshot"; return
-                                }
-                                let restored = PhoneRegistry(service: self.service)
-                                guard restored.key(for: enrollment.phoneID) == enrollment.credential,
-                                      restored.all().first?.name == "Smoke iPhone" else {
-                                    self.result = "Credential was not restored from Keychain"; return
-                                }
-                                self.revokedEnrollment = enrollment
-                                self.server.revokePhone(enrollment.phoneID)
-                                connection.cancel()
-                            }
-                        }
-                    })
-                } catch {
-                    self.result = "Could not make request: \(error)"
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch state {
+                case .ready: self.sendAuthenticatedSnapshot(connection, enrollment: enrollment)
+                case .failed(let error): self.result = "Connection failed: \(error)"
+                default: break
                 }
-            case .failed(let error): self.result = "Connection failed: \(error)"
-            default: break
             }
         }
         connection.start(queue: .main)
+    }
+
+    private func sendAuthenticatedSnapshot(_ connection: NWConnection, enrollment: PairingWire.Enrollment) {
+        do {
+            let request = try PairingWire.authenticatedRequest("snapshot.v1", phoneID: enrollment.phoneID,
+                                                                key: enrollment.credential)
+            connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { [weak self] error in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let error { self.result = "Send failed: \(error)"; return }
+                    self.receiveSnapshotHeader(connection, enrollment: enrollment)
+                }
+            })
+        } catch {
+            result = "Could not make request: \(error)"
+        }
+    }
+
+    private func receiveSnapshotHeader(_ connection: NWConnection, enrollment: PairingWire.Enrollment) {
+        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] header, _, _, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard let header, let length = SecurePacket.length(header) else {
+                    self.result = "Missing response header"
+                    return
+                }
+                self.receiveSnapshotBody(connection, length: length, enrollment: enrollment)
+            }
+        }
+    }
+
+    private func receiveSnapshotBody(_ connection: NWConnection, length: Int,
+                                     enrollment: PairingWire.Enrollment) {
+        connection.receive(minimumIncompleteLength: length, maximumLength: length) { [weak self] body, _, _, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard let body,
+                      let opened = try? SecurePacket.open(body, using: enrollment.credential),
+                      let snapshot = try? JSONDecoder().decode(MetricSnapshot.self, from: opened),
+                      snapshot.machineName == "Pairing smoke Mac" else {
+                    self.result = "Invalid authenticated snapshot"
+                    return
+                }
+                let restored = PhoneRegistry(service: self.service)
+                guard restored.key(for: enrollment.phoneID) == enrollment.credential,
+                      restored.all().first?.name == "Smoke iPhone" else {
+                    self.result = "Credential was not restored from Keychain"
+                    return
+                }
+                self.revokedEnrollment = enrollment
+                self.server.revokePhone(enrollment.phoneID)
+                connection.cancel()
+            }
+        }
     }
 
     private func checkRevoked(_ enrollment: PairingWire.Enrollment) {
@@ -119,30 +150,42 @@ private final class Runner {
         let connection = NWConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!), using: .tcp)
         fetch = connection
         connection.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .ready:
-                guard let request = try? PairingWire.authenticatedRequest(
-                    "snapshot.v1", phoneID: enrollment.phoneID, key: enrollment.credential
-                ) else { self.result = "Could not make revoked request"; return }
-                connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
-                    guard error == nil else { self.result = "Revoked request could not be sent"; return }
-                    connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, complete, error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch state {
+                case .ready: self.sendRevokedRequest(connection, enrollment: enrollment)
+                case .failed(let error): self.result = "Revocation connection failed: \(error)"
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func sendRevokedRequest(_ connection: NWConnection, enrollment: PairingWire.Enrollment) {
+        guard let request = try? PairingWire.authenticatedRequest(
+            "snapshot.v1", phoneID: enrollment.phoneID, key: enrollment.credential
+        ) else { result = "Could not make revoked request"; return }
+        connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard error == nil else { self.result = "Revoked request could not be sent"; return }
+                connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] header, _, complete, error in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
                         self.result = header == nil && complete && error == nil
                             ? "pass" : "Revoked phone received a response"
                         connection.cancel()
                     }
-                })
-            case .failed(let error): self.result = "Revocation connection failed: \(error)"
-            default: break
+                }
             }
-        }
-        connection.start(queue: .main)
+        })
     }
 }
 
 @main
 struct PairingSmoke {
+    @MainActor
     static func main() {
         let runner = Runner()
         runner.run()

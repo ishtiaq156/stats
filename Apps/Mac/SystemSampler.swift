@@ -2,10 +2,12 @@ import ActivityCore
 import AppKit
 import Darwin
 import DiskArbitration
+import CoreWLAN
 import Foundation
 import IOKit
 import IOKit.ps
 import IOKit.storage
+import SystemConfiguration
 
 @MainActor
 final class SystemSampler {
@@ -29,7 +31,13 @@ final class SystemSampler {
     private var cachedHardware: CPUHardwareReadings?
     private var hardwareFetching = false
     private var lastHardwareFetch: Date = .distantPast
-    private var previousNetwork: (received: UInt64, sent: UInt64, date: Date)?
+    private var previousNetwork: [String: (received: UInt64, sent: UInt64, date: Date)] = [:]
+    private var lastNetworkInterface: String?
+    private let networkReader = NetworkAuxReader()
+    private var wifiNameAuthorized = false
+    private var cachedNetworkAux: NetworkAuxSample?
+    private var networkAuxFetching = false
+    private var lastNetworkAuxFetch: Date = .distantPast
     private let diskReader = DiskSensorReader()
     private var diskFetching = false
     private var lastDiskFetch: Date = .distantPast
@@ -106,6 +114,7 @@ final class SystemSampler {
         let disk = diskUsage()
         refreshDiskIfNeeded(at: date)
         let network = networkRates(at: date)
+        if let name = network?.details.interfaceName { refreshNetworkAuxIfNeeded(for: name, at: date) }
         let battery = batteryStatus()
 
         return MetricSnapshot(
@@ -122,8 +131,18 @@ final class SystemSampler {
             isCharging: battery?.charging,
             cpuDetails: cpu.details,
             ramDetails: memory?.details,
-            diskDetails: cachedDiskDetails
+            diskDetails: cachedDiskDetails,
+            networkDetails: network?.details
         )
+    }
+
+    func setWiFiNameAuthorized(_ authorized: Bool) {
+        guard wifiNameAuthorized != authorized else { return }
+        wifiNameAuthorized = authorized
+        // Never retain a name after access is revoked. An in-flight read uses
+        // its captured authorization and is rejected if the state changed.
+        cachedNetworkAux = nil
+        lastNetworkAuxFetch = .distantPast
     }
 
     private func cpuUsage(at date: Date) -> (usage: Double?, details: CPUDetails) {
@@ -479,31 +498,155 @@ final class SystemSampler {
         diskFetching = false
     }
 
-    private func networkRates(at date: Date) -> (received: Double, sent: Double)? {
+    private func networkRates(at date: Date) -> (received: Double?, sent: Double?, details: NetworkDetails)? {
+        // Route selection comes from SystemConfiguration, not a sum of every
+        // en*/bridge/VPN interface. If no primary route exists, report unknown.
+        let primaryIPv4 = SCDynamicStoreCopyValue(nil, "State:/Network/Global/IPv4" as CFString) as? [String: Any]
+        let primaryIPv6 = SCDynamicStoreCopyValue(nil, "State:/Network/Global/IPv6" as CFString) as? [String: Any]
+        guard let routedName = (primaryIPv4?["PrimaryInterface"] as? String) ??
+                               (primaryIPv6?["PrimaryInterface"] as? String), !routedName.isEmpty else {
+            lastNetworkInterface = nil
+            return nil
+        }
+        // As in the reference network reader, a VPN's virtual default route
+        // should resolve to the active underlying hardware interface.
+        let name = Self.physicalInterface(underlying: routedName) ?? routedName
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0 else { return nil }
         defer { freeifaddrs(head) }
-        var received: UInt64 = 0
-        var sent: UInt64 = 0
+        var totalReceived: UInt64?
+        var totalSent: UInt64?
+        var ipv4: String?
+        var ipv6: String?
+        var isActive: Bool?
+        var linkSpeed: Double?
         var cursor = head
         while let item = cursor {
-            let address = item.pointee.ifa_addr
-            if address?.pointee.sa_family == UInt8(AF_LINK),
-               item.pointee.ifa_flags & UInt32(IFF_LOOPBACK) == 0,
-               let data = item.pointee.ifa_data {
-                let counters = data.assumingMemoryBound(to: if_data.self).pointee
-                received += UInt64(counters.ifi_ibytes)
-                sent += UInt64(counters.ifi_obytes)
+            defer { cursor = item.pointee.ifa_next }
+            guard String(cString: item.pointee.ifa_name) == name,
+                  let address = item.pointee.ifa_addr else { continue }
+            let flags = item.pointee.ifa_flags
+            let family = address.pointee.sa_family
+            if family == UInt8(AF_INET), ipv4 == nil {
+                var addr = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                    $0.pointee.sin_addr
+                }
+                var bytes = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                if inet_ntop(AF_INET, &addr, &bytes, socklen_t(bytes.count)) != nil {
+                    ipv4 = String(decoding: bytes.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                }
+            } else if family == UInt8(AF_INET6) {
+                var addr = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                    $0.pointee.sin6_addr
+                }
+                var bytes = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                if inet_ntop(AF_INET6, &addr, &bytes, socklen_t(bytes.count)) != nil {
+                    let candidate = String(decoding: bytes.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                    if ipv6 == nil || (ipv6?.hasPrefix("fe80:") == true && !candidate.hasPrefix("fe80:")) {
+                        ipv6 = candidate
+                    }
+                }
             }
-            cursor = item.pointee.ifa_next
+            guard family == UInt8(AF_LINK) else { continue }
+            isActive = flags & UInt32(IFF_UP | IFF_RUNNING) == UInt32(IFF_UP | IFF_RUNNING)
+            guard let data = item.pointee.ifa_data else { continue }
+            let counters = data.assumingMemoryBound(to: if_data.self).pointee
+            totalReceived = UInt64(counters.ifi_ibytes)
+            totalSent = UInt64(counters.ifi_obytes)
+            if counters.ifi_baudrate > 0 {
+                linkSpeed = Double(counters.ifi_baudrate) / 1_000_000
+            }
         }
-        defer { previousNetwork = (received, sent, date) }
-        guard let previousNetwork, received >= previousNetwork.received,
-              sent >= previousNetwork.sent else { return nil }
-        let elapsed = date.timeIntervalSince(previousNetwork.date)
-        guard elapsed > 0 else { return nil }
-        return (Double(received - previousNetwork.received) / elapsed,
-                Double(sent - previousNetwork.sent) / elapsed)
+        var down: Double?
+        var up: Double?
+        if let totalReceived, let totalSent {
+            let previous = previousNetwork[name]
+            let elapsed = previous.map { date.timeIntervalSince($0.date) } ?? 0
+            // First reading on a new primary, counter rollover, and link loss
+            // all invalidate an instantaneous rate, avoiding artificial spikes.
+            if name == lastNetworkInterface, isActive == true, elapsed > 0, elapsed <= 10,
+               let previous, totalReceived >= previous.received, totalSent >= previous.sent {
+                down = Double(totalReceived - previous.received) / elapsed
+                up = Double(totalSent - previous.sent) / elapsed
+            }
+            previousNetwork[name] = (totalReceived, totalSent, date)
+        }
+        lastNetworkInterface = name
+
+        let aux = cachedNetworkAux?.interfaceName == name ? cachedNetworkAux : nil
+        let gateway = (primaryIPv4?["PrimaryInterface"] as? String) == name ?
+            primaryIPv4?["Router"] as? String : nil
+        let details = NetworkDetails(
+            interfaceName: name, displayName: aux?.displayName,
+            connectionType: aux?.connectionType, isActive: isActive,
+            localIPv4: ipv4, localIPv6: ipv6, gatewayIPv4: aux?.gatewayIPv4 ?? gateway,
+            dnsServers: aux?.dnsServers, hardwareAddress: aux?.hardwareAddress,
+            ssid: aux?.ssid, wifiRSSI: aux?.wifiRSSI, wifiNoise: aux?.wifiNoise,
+            wifiStandard: aux?.wifiStandard, wifiChannel: aux?.wifiChannel,
+            linkSpeedMbps: aux?.linkSpeedMbps ?? linkSpeed,
+            totalReceivedBytes: totalReceived, totalSentBytes: totalSent,
+            // A cached successful probe must not imply current connectivity
+            // after the selected interface has become inactive.
+            connectivityStatus: isActive == true ? aux?.connectivityStatus : nil,
+            latencyMs: isActive == true ? aux?.latencyMs : nil,
+            jitterMs: isActive == true ? aux?.jitterMs : nil,
+            topProcesses: aux?.topProcesses)
+        return (down, up, details)
+    }
+
+    private static func isVirtualInterface(_ name: String) -> Bool {
+        ["utun", "ipsec", "ppp", "tun", "tap", "gif", "stf", "wg"].contains {
+            name.hasPrefix($0)
+        }
+    }
+
+    private static func physicalInterface(underlying route: String) -> String? {
+        guard isVirtualInterface(route) else { return nil }
+        if let setup = SCDynamicStoreCopyValue(nil, "Setup:/Network/Global/IPv4" as CFString) as? [String: Any],
+           let order = setup["ServiceOrder"] as? [String] {
+            for serviceID in order {
+                guard let service = SCDynamicStoreCopyValue(
+                    nil, "State:/Network/Service/\(serviceID)/IPv4" as CFString
+                ) as? [String: Any],
+                service["Router"] != nil,
+                let name = service["InterfaceName"] as? String,
+                !isVirtualInterface(name) else { continue }
+                return name
+            }
+        }
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0 else { return nil }
+        defer { freeifaddrs(head) }
+        var cursor = head
+        while let item = cursor {
+            defer { cursor = item.pointee.ifa_next }
+            let flags = item.pointee.ifa_flags
+            guard flags & UInt32(IFF_UP | IFF_RUNNING) == UInt32(IFF_UP | IFF_RUNNING),
+                  flags & UInt32(IFF_LOOPBACK | IFF_POINTOPOINT) == 0,
+                  item.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: item.pointee.ifa_name)
+            if !isVirtualInterface(name) { return name }
+        }
+        return nil
+    }
+
+    private func refreshNetworkAuxIfNeeded(for name: String, at date: Date) {
+        guard !networkAuxFetching,
+              cachedNetworkAux?.interfaceName != name || date.timeIntervalSince(lastNetworkAuxFetch) >= 6 else { return }
+        networkAuxFetching = true
+        lastNetworkAuxFetch = date
+        let authorized = wifiNameAuthorized
+        Task.detached(priority: .utility) { [weak self, reader = networkReader] in
+            let info = reader.read(for: name, includeWiFiName: authorized)
+            await self?.receivedNetworkAux(info, authorizedAtRead: authorized)
+        }
+    }
+
+    private func receivedNetworkAux(_ info: NetworkAuxSample, authorizedAtRead: Bool) {
+        if authorizedAtRead == wifiNameAuthorized {
+            cachedNetworkAux = info
+        }
+        networkAuxFetching = false
     }
 
     private func batteryStatus() -> (fraction: Double, charging: Bool)? {
@@ -520,6 +663,239 @@ final class SystemSampler {
             return (min(1, Double(current) / Double(maximum)), charging)
         }
         return nil
+    }
+}
+
+/// Slow network details are sampled independently of the two-second telemetry
+/// timer. Fields are explicitly tied to the interface for which they were read.
+private struct NetworkAuxSample: Sendable {
+    let interfaceName: String
+    var displayName: String?
+    var connectionType: String?
+    var gatewayIPv4: String?
+    var dnsServers: [String]?
+    var hardwareAddress: String?
+    var ssid: String?
+    var wifiRSSI: Int?
+    var wifiNoise: Int?
+    var wifiStandard: String?
+    var wifiChannel: String?
+    var linkSpeedMbps: Double?
+    var connectivityStatus: Bool?
+    var latencyMs: Double?
+    var jitterMs: Double?
+    var topProcesses: [NetworkProcess]?
+}
+
+/// The caller serializes this reader's invocations; mutable counter baselines
+/// remain private to its background utility task.
+private final class NetworkAuxReader: @unchecked Sendable {
+    private struct ProcessCount {
+        let name: String
+        let received: UInt64
+        let sent: UInt64
+        let time: TimeInterval
+    }
+
+    private var primary: String?
+    private var previousProcesses: [Int: ProcessCount] = [:]
+    private var lastProbeTime: TimeInterval = -.infinity
+    private var connectivity: Bool?
+    private var lastLatency: Double?
+    private var jitter: Double?
+
+    func read(for name: String, includeWiFiName: Bool) -> NetworkAuxSample {
+        if primary != name {
+            primary = name
+            previousProcesses.removeAll()
+            lastProbeTime = -.infinity
+            connectivity = nil
+            lastLatency = nil
+            jitter = nil
+        }
+        var details = NetworkAuxSample(interfaceName: name)
+
+        if let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface],
+           let selected = interfaces.first(where: { (SCNetworkInterfaceGetBSDName($0) as String?) == name }) {
+            details.displayName = SCNetworkInterfaceGetLocalizedDisplayName(selected) as String?
+            details.hardwareAddress = SCNetworkInterfaceGetHardwareAddressString(selected) as String?
+            if let kind = SCNetworkInterfaceGetInterfaceType(selected) {
+                switch kind {
+                case kSCNetworkInterfaceTypeIEEE80211: details.connectionType = "Wi-Fi"
+                case kSCNetworkInterfaceTypeEthernet: details.connectionType = "Ethernet"
+                case kSCNetworkInterfaceTypeBluetooth: details.connectionType = "Bluetooth"
+                case kSCNetworkInterfaceTypeWWAN: details.connectionType = "Cellular"
+                default: details.connectionType = kind as String
+                }
+            }
+        } else if name.hasPrefix("utun") || name.hasPrefix("ipsec") || name.hasPrefix("ppp") {
+            details.connectionType = "Tunnel"
+        }
+
+        let global = SCDynamicStoreCopyValue(nil, "State:/Network/Global/IPv4" as CFString) as? [String: Any]
+        var selectedService: String?
+        if global?["PrimaryInterface"] as? String == name {
+            details.gatewayIPv4 = global?["Router"] as? String
+            selectedService = global?["PrimaryService"] as? String
+        } else if let setup = SCDynamicStoreCopyValue(nil, "Setup:/Network/Global/IPv4" as CFString) as? [String: Any],
+                  let order = setup["ServiceOrder"] as? [String] {
+            for serviceID in order {
+                guard let service = SCDynamicStoreCopyValue(
+                    nil, "State:/Network/Service/\(serviceID)/IPv4" as CFString
+                ) as? [String: Any],
+                service["InterfaceName"] as? String == name,
+                let router = service["Router"] as? String else { continue }
+                details.gatewayIPv4 = router
+                selectedService = serviceID
+                break
+            }
+        }
+        if let service = selectedService {
+            let stateDNS = SCDynamicStoreCopyValue(nil, "State:/Network/Service/\(service)/DNS" as CFString) as? [String: Any]
+            let configuredDNS = SCDynamicStoreCopyValue(nil, "Setup:/Network/Service/\(service)/DNS" as CFString) as? [String: Any]
+            details.dnsServers = (stateDNS?["ServerAddresses"] as? [String]) ??
+                (configuredDNS?["ServerAddresses"] as? [String])
+        }
+
+        if details.connectionType == "Wi-Fi",
+           let interface = CWWiFiClient.shared().interface(withName: name) {
+            if includeWiFiName {
+                let ssid = interface.ssid()?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let ssid, !ssid.isEmpty && ssid != "<redacted>" { details.ssid = ssid }
+            }
+            let rssi = interface.rssiValue()
+            if (-110 ... -1).contains(rssi) { details.wifiRSSI = rssi }
+            let noise = interface.noiseMeasurement()
+            if (-130 ... -1).contains(noise) { details.wifiNoise = noise }
+            let transmit = interface.transmitRate()
+            if transmit.isFinite && transmit > 0 { details.linkSpeedMbps = transmit }
+            switch interface.activePHYMode() {
+            case .mode11a: details.wifiStandard = "802.11a"
+            case .mode11b: details.wifiStandard = "802.11b"
+            case .mode11g: details.wifiStandard = "802.11g"
+            case .mode11n: details.wifiStandard = "802.11n"
+            case .mode11ac: details.wifiStandard = "802.11ac"
+            case .mode11ax: details.wifiStandard = "802.11ax"
+            case .mode11be: details.wifiStandard = "802.11be"
+            default: break
+            }
+            if let channel = interface.wlanChannel() {
+                let band: String
+                switch channel.channelBand {
+                case .band2GHz: band = "2.4 GHz"
+                case .band5GHz: band = "5 GHz"
+                case .band6GHz: band = "6 GHz"
+                default: band = "Unknown band"
+                }
+                let width: String
+                switch channel.channelWidth {
+                case .width20MHz: width = "20 MHz"
+                case .width40MHz: width = "40 MHz"
+                case .width80MHz: width = "80 MHz"
+                case .width160MHz: width = "160 MHz"
+                default: width = "Unknown width"
+                }
+                details.wifiChannel = "\(channel.channelNumber) (\(band), \(width))"
+            }
+        }
+
+        details.topProcesses = readTopProcesses()
+        updateConnectivityIfDue()
+        details.connectivityStatus = connectivity
+        details.latencyMs = lastLatency
+        details.jitterMs = jitter
+        return details
+    }
+
+    /// nettop exposes per-process cumulative socket bytes across all interface
+    /// types. Unlike interface counters, these figures are not Wi-Fi-only.
+    private func readTopProcesses() -> [NetworkProcess]? {
+        guard let response = Self.runCommand("/usr/bin/nettop",
+                    ["-P", "-L", "1", "-n", "-x", "-s", "1", "-J", "bytes_in,bytes_out"],
+                    timeout: 5), response.status == 0 else { return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        var next: [Int: ProcessCount] = [:]
+        var ranked: [NetworkProcess] = []
+        for line in response.output.split(separator: "\n").dropFirst() {
+            let columns = line.split(separator: ",", omittingEmptySubsequences: false)
+            guard columns.count >= 3,
+                  let marker = columns[0].lastIndex(of: "."),
+                  let pid = Int(columns[0][columns[0].index(after: marker)...]), pid > 0,
+                  let received = UInt64(columns[1]), let sent = UInt64(columns[2]) else { continue }
+            let processName = String(columns[0][..<marker])
+            next[pid] = ProcessCount(name: processName, received: received, sent: sent, time: now)
+            guard let previous = previousProcesses[pid], previous.name == processName,
+                  received >= previous.received, sent >= previous.sent else { continue }
+            let elapsed = now - previous.time
+            guard elapsed > 0, elapsed < 30 else { continue }
+            let rx = Double(received - previous.received) / elapsed
+            let tx = Double(sent - previous.sent) / elapsed
+            guard rx > 0 || tx > 0 else { continue }
+            let name = NSRunningApplication(processIdentifier: pid_t(pid))?.localizedName ?? processName
+            ranked.append(NetworkProcess(pid: pid, name: name,
+                                         receivedBytesPerSecond: rx, sentBytesPerSecond: tx))
+        }
+        let hadBaseline = !previousProcesses.isEmpty
+        previousProcesses = next
+        guard hadBaseline else { return nil }
+        return Array(ranked.sorted {
+            let lhs = max($0.receivedBytesPerSecond ?? 0, $0.sentBytesPerSecond ?? 0)
+            let rhs = max($1.receivedBytesPerSecond ?? 0, $1.sentBytesPerSecond ?? 0)
+            return lhs == rhs ? $0.pid < $1.pid : lhs > rhs
+        }.prefix(8))
+    }
+
+    private func updateConnectivityIfDue() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastProbeTime >= 10 else { return }
+        lastProbeTime = now
+        // One low-frequency ICMP echo to Cloudflare's 1.1.1.1. This tests the
+        // path to that endpoint; a failure does not prove all Internet is down.
+        guard let result = Self.runCommand("/sbin/ping",
+                                           ["-n", "-c", "1", "-W", "1000", "1.1.1.1"],
+                                           timeout: 3) else {
+            connectivity = nil
+            lastLatency = nil
+            jitter = nil
+            lastProbeTime = now
+            return
+        }
+        connectivity = result.status == 0
+        guard result.status == 0,
+              let expression = try? NSRegularExpression(pattern: #"time=([0-9]+(?:\.[0-9]+)?)\s*ms"#),
+              let match = expression.firstMatch(in: result.output, range: NSRange(result.output.startIndex..., in: result.output)),
+              let range = Range(match.range(at: 1), in: result.output),
+              let latency = Double(result.output[range]), latency.isFinite else {
+            lastLatency = nil
+            jitter = nil
+            return
+        }
+        if let prior = lastLatency {
+            let variation = abs(latency - prior)
+            jitter = jitter.map { 0.7 * $0 + 0.3 * variation } ?? variation
+        }
+        lastLatency = latency
+    }
+
+    private static func runCommand(_ executable: String, _ arguments: [String],
+                                   timeout: TimeInterval) -> (output: String, status: Int32)? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: executable)
+        task.arguments = arguments
+        task.environment = ["LC_ALL": "C", "NSUnbufferedIO": "YES"]
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        task.terminationHandler = { _ in done.signal() }
+        guard (try? task.run()) != nil else { return nil }
+        guard done.wait(timeout: .now() + timeout) == .success else {
+            if task.isRunning { task.terminate() }
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        return (text, task.terminationStatus)
     }
 }
 

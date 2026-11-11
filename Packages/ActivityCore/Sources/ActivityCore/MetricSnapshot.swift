@@ -19,6 +19,7 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
     public let cpuDetails: CPUDetails?
     public let ramDetails: RAMDetails?
     public let diskDetails: DiskDetails?
+    public let networkDetails: NetworkDetails?
 
     public init(
         machineName: String,
@@ -34,7 +35,8 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         isCharging: Bool? = nil,
         cpuDetails: CPUDetails? = nil,
         ramDetails: RAMDetails? = nil,
-        diskDetails: DiskDetails? = nil
+        diskDetails: DiskDetails? = nil,
+        networkDetails: NetworkDetails? = nil
     ) {
         self.version = Self.protocolVersion
         self.machineName = machineName
@@ -51,11 +53,12 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
         self.cpuDetails = cpuDetails
         self.ramDetails = ramDetails
         self.diskDetails = diskDetails
+        self.networkDetails = networkDetails
     }
 
     /// Keep history compact. The CPU and RAM history charts use only aggregate
-    /// fractions/bytes; per-volume disk history uses IDs and rates. The live
-    /// snapshot still supplies full CPU, RAM, disk, and process details.
+    /// fractions/bytes; per-volume disk history uses IDs and rates. Network
+    /// history uses aggregate received/sent rates. Live snapshots retain details.
     public func withoutCPUProcesses() -> MetricSnapshot {
         MetricSnapshot(machineName: machineName, timestamp: timestamp, cpuFraction: cpuFraction,
                        memoryUsedBytes: memoryUsedBytes, memoryTotalBytes: memoryTotalBytes,
@@ -64,6 +67,85 @@ public struct MetricSnapshot: Codable, Sendable, Equatable {
                        networkSentBytesPerSecond: networkSentBytesPerSecond,
                        batteryFraction: batteryFraction, isCharging: isCharging,
                        diskDetails: diskDetails?.withoutProcesses())
+    }
+}
+
+public struct NetworkProcess: Codable, Sendable, Equatable, Identifiable {
+    public let pid: Int
+    public let name: String
+    public let receivedBytesPerSecond: Double?
+    public let sentBytesPerSecond: Double?
+    public var id: Int { pid }
+
+    public init(pid: Int, name: String, receivedBytesPerSecond: Double? = nil,
+                sentBytesPerSecond: Double? = nil) {
+        self.pid = pid
+        self.name = name
+        self.receivedBytesPerSecond = receivedBytesPerSecond
+        self.sentBytesPerSecond = sentBytesPerSecond
+    }
+}
+
+/// Details for the primary interface selected by macOS. Total bytes are
+/// interface counters since boot (or the interface's most recent reset).
+/// Per-process byte rates are system-wide socket activity from `nettop`.
+public struct NetworkDetails: Codable, Sendable, Equatable {
+    public let interfaceName: String?
+    public let displayName: String?
+    public let connectionType: String?
+    public let isActive: Bool?
+    public let localIPv4: String?
+    public let localIPv6: String?
+    public let gatewayIPv4: String?
+    public let dnsServers: [String]?
+    public let hardwareAddress: String?
+    public let ssid: String?
+    public let wifiRSSI: Int?
+    public let wifiNoise: Int?
+    public let wifiStandard: String?
+    public let wifiChannel: String?
+    public let linkSpeedMbps: Double?
+    public let totalReceivedBytes: UInt64?
+    public let totalSentBytes: UInt64?
+    /// ICMP reachability of the configured probe endpoint, not global Internet health.
+    public let connectivityStatus: Bool?
+    public let latencyMs: Double?
+    /// Absolute difference between consecutive successful ICMP round trips.
+    public let jitterMs: Double?
+    public let topProcesses: [NetworkProcess]?
+
+    public init(interfaceName: String? = nil, displayName: String? = nil,
+                connectionType: String? = nil, isActive: Bool? = nil,
+                localIPv4: String? = nil, localIPv6: String? = nil,
+                gatewayIPv4: String? = nil, dnsServers: [String]? = nil,
+                hardwareAddress: String? = nil, ssid: String? = nil,
+                wifiRSSI: Int? = nil, wifiNoise: Int? = nil,
+                wifiStandard: String? = nil, wifiChannel: String? = nil,
+                linkSpeedMbps: Double? = nil, totalReceivedBytes: UInt64? = nil,
+                totalSentBytes: UInt64? = nil, connectivityStatus: Bool? = nil,
+                latencyMs: Double? = nil, jitterMs: Double? = nil,
+                topProcesses: [NetworkProcess]? = nil) {
+        self.interfaceName = interfaceName
+        self.displayName = displayName
+        self.connectionType = connectionType
+        self.isActive = isActive
+        self.localIPv4 = localIPv4
+        self.localIPv6 = localIPv6
+        self.gatewayIPv4 = gatewayIPv4
+        self.dnsServers = dnsServers
+        self.hardwareAddress = hardwareAddress
+        self.ssid = ssid
+        self.wifiRSSI = wifiRSSI
+        self.wifiNoise = wifiNoise
+        self.wifiStandard = wifiStandard
+        self.wifiChannel = wifiChannel
+        self.linkSpeedMbps = linkSpeedMbps
+        self.totalReceivedBytes = totalReceivedBytes
+        self.totalSentBytes = totalSentBytes
+        self.connectivityStatus = connectivityStatus
+        self.latencyMs = latencyMs
+        self.jitterMs = jitterMs
+        self.topProcesses = topProcesses
     }
 }
 

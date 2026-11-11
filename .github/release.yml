@@ -1,0 +1,30 @@
+# Categories used by GitHub's Generate release notes feature for future PRs.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+    - title: Features
+      labels:
+        - enhancement
+        - feature
+    - title: Fixes
+      labels:
+        - bug
+        - fix
+    - title: Performance
+      labels:
+        - performance
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Maintenance
+      labels:
+        - dependencies
+        - chore
+    - title: Other Changes
+      labels:
+        - '*'

@@ -98,6 +98,8 @@ struct MetricDetailView: View {
             RAMDetailView(store: store)
         } else if kind == .storage {
             DiskDetailView(store: store)
+        } else if kind == .network {
+            NetworkDetailView(store: store)
         } else {
             standardDetail
         }
@@ -1720,5 +1722,571 @@ private struct DiskVolumeCard: View {
     private func percent(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "Unavailable" }
         return value.formatted(.number.precision(.fractionLength(0))) + "%"
+    }
+}
+
+private struct NetworkRatePoint: Identifiable {
+    let timestamp: Date
+    let received: Double?
+    let sent: Double?
+    var id: Date { timestamp }
+
+    init?(snapshot: MetricSnapshot) {
+        let received = snapshot.networkReceivedBytesPerSecond
+        let sent = snapshot.networkSentBytesPerSecond
+        self.received = received.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.sent = sent.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        guard self.received != nil || self.sent != nil else { return nil }
+        timestamp = snapshot.timestamp
+    }
+}
+
+private struct NetworkConnectivityPoint: Identifiable {
+    let timestamp: Date
+    let reachable: Bool
+    var id: Date { timestamp }
+}
+
+/// Compact interface activity and network settings, keeping all values tied to Mac readings.
+private struct NetworkDetailView: View {
+    @ObservedObject var store: NearbyMacStore
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var localSamples: [NetworkRatePoint] = []
+    @State private var connectivitySamples: [NetworkConnectivityPoint] = []
+
+    private let downloadColor = Color(red: 0.04, green: 0.57, blue: 0.99)
+    private let uploadColor = Color(red: 0.98, green: 0.31, blue: 0.37)
+
+    private var snapshot: MetricSnapshot? { store.snapshot }
+    private var details: NetworkDetails? { snapshot?.networkDetails }
+    private var panelColor: Color {
+        colorScheme == .dark ? Color(white: 0.25) : Color(uiColor: .secondarySystemGroupedBackground)
+    }
+    private var displayName: String {
+        if let name = details?.displayName, !name.isEmpty { return name }
+        if let name = details?.interfaceName, !name.isEmpty { return name }
+        return "Network interface"
+    }
+    private var connectionStatus: String {
+        if !store.selectedReachable { return "Mac offline" }
+        guard let active = details?.isActive else { return "Unavailable" }
+        return active ? "UP" : "DOWN"
+    }
+    private var download: Double? { snapshot?.networkReceivedBytesPerSecond }
+    private var upload: Double? { snapshot?.networkSentBytesPerSecond }
+
+    private var history: [NetworkRatePoint] {
+        // The aggregate RX/TX pair is already part of the compact history protocol.
+        // A short local buffer also covers companions that return no history yet.
+        let remote = store.history.compactMap(NetworkRatePoint.init(snapshot:))
+        var merged: [Date: NetworkRatePoint] = [:]
+        for sample in remote { merged[sample.timestamp] = sample }
+        for sample in localSamples { merged[sample.timestamp] = sample }
+        let ordered = merged.values.sorted { $0.timestamp < $1.timestamp }
+        guard ordered.count > 240 else { return ordered }
+        let bucketSize = Int(ceil(Double(ordered.count) / 100))
+        var result: [NetworkRatePoint] = []
+        result.reserveCapacity(404)
+        for start in stride(from: 0, to: ordered.count, by: bucketSize) {
+            let bucket = ordered[start..<min(ordered.count, start + bucketSize)]
+            let candidates: [NetworkRatePoint?] = [
+                bucket.first, bucket.last,
+                bucket.max { ($0.received ?? 0) < ($1.received ?? 0) },
+                bucket.max { ($0.sent ?? 0) < ($1.sent ?? 0) }
+            ]
+            var seen = Set<Date>()
+            result.append(contentsOf: candidates.compactMap { $0 }
+                .filter { seen.insert($0.timestamp).inserted }
+                .sorted { $0.timestamp < $1.timestamp })
+        }
+        return result
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 13) {
+                macHeader
+                VStack(alignment: .leading, spacing: 14) {
+                    ratesCard
+                    trafficCard
+                    interfaceCard
+                    addressCard
+                    processCard
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(panelColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .frame(maxWidth: 540)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Network")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { capture(snapshot) }
+        .onChange(of: store.snapshot) { _, value in capture(value) }
+        .onChange(of: store.selectedName) { _, _ in
+            localSamples.removeAll()
+            connectivitySamples.removeAll()
+        }
+    }
+
+    private var macHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "network")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text(store.selectedDisplayName ?? "Mac")
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Circle()
+                .fill(store.selectedReachable ? Color.green : Color.secondary)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(store.selectedReachable ? "Connected" : "Offline")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var ratesCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    if let name = details?.interfaceName, !name.isEmpty, name != displayName {
+                        Text(name)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 5) {
+                    Circle().fill(details?.isActive == true ? Color.green : Color.secondary)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                    Text(connectionStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                rateGauge("Download", icon: "arrow.down", rate: download, color: downloadColor)
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(width: 1, height: 66)
+                    .accessibilityHidden(true)
+                rateGauge("Upload", icon: "arrow.up", rate: upload, color: uploadColor)
+            }
+            .padding(.vertical, 4)
+
+            sectionTitle("Usage history")
+            if history.count >= 2 {
+                NetworkActivityPlot(samples: history, downloadColor: downloadColor,
+                                    uploadColor: uploadColor)
+                    .frame(height: 130)
+                    .background(downloadColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Network throughput history")
+                    .accessibilityValue("\(history.count) measured samples. Blue download below the middle line; red upload above. Latest download \(networkRate(download)), upload \(networkRate(upload)).")
+            } else {
+                VStack(spacing: 5) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .foregroundStyle(.secondary)
+                        .font(.title3)
+                    Text(download == nil && upload == nil ?
+                         "Network throughput unavailable" : "History appears after two readings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 130)
+                .background(downloadColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            }
+
+            HStack(spacing: 14) {
+                legend("Download", color: downloadColor)
+                legend("Upload", color: uploadColor)
+                Spacer(minLength: 0)
+                Text("Bytes/s")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            sectionTitle("Connectivity history")
+            if !connectivitySamples.isEmpty {
+                NetworkConnectivityPlot(samples: connectivitySamples)
+                    .frame(height: 58)
+                    .background(Color.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Connection probe history")
+                    .accessibilityValue("\(connectivitySamples.count) actual checks; \(connectivitySamples.filter(\.reachable).count) successful")
+            } else {
+                Text("Connectivity history unavailable until a check completes")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(Color.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+            }
+        }
+    }
+
+    private func rateGauge(_ label: String, icon: String, rate: Double?, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.caption.weight(.bold))
+                Text(label)
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(color)
+            Text(networkRate(rate))
+                .font(.system(size: 21, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.62)
+                .lineLimit(1)
+            Capsule()
+                .fill(color)
+                .frame(width: 35, height: 3)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(networkRate(rate))
+    }
+
+    private var trafficCard: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            sectionTitle("Interface")
+            metricRow("Total upload", MetricFormat.bytes(details?.totalSentBytes))
+            metricRow("Total download", MetricFormat.bytes(details?.totalReceivedBytes))
+            metricRow("Status", connectionStatus)
+            metricRow("Connectivity check", connectivityLabel)
+            metricRow("Latency", duration(details?.latencyMs))
+            metricRow("Jitter", duration(details?.jitterMs))
+            Text("Traffic totals are interface counters; connectivity is an ICMP probe")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var connectivityLabel: String {
+        if !store.selectedReachable { return "Mac offline" }
+        guard let status = details?.connectivityStatus else { return "Unavailable" }
+        return status ? "UP" : "DOWN"
+    }
+
+    private func duration(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else { return "Unavailable" }
+        return value.formatted(.number.precision(.fractionLength(0...1))) + " ms"
+    }
+
+    private var interfaceCard: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            sectionTitle("Interface")
+            metricRow("Name", displayName)
+            metricRow("Type", available(details?.connectionType))
+            metricRow("BSD interface", available(details?.interfaceName))
+            metricRow("Status", connectionStatus)
+            if let hardwareAddress = details?.hardwareAddress, !hardwareAddress.isEmpty {
+                metricRow("Physical address", hardwareAddress)
+            }
+            if let ssid = details?.ssid, !ssid.isEmpty {
+                metricRow("Network", ssid)
+            }
+            if let speed = details?.linkSpeedMbps, speed.isFinite, speed > 0 {
+                metricRow("Link speed", speed.formatted(.number.precision(.fractionLength(0...1))) + " Mbps")
+            }
+            if let standard = details?.wifiStandard, !standard.isEmpty {
+                metricRow("Wi-Fi standard", standard)
+            }
+            if let channel = details?.wifiChannel, !channel.isEmpty {
+                metricRow("Wi-Fi channel", channel)
+            }
+            if let rssi = details?.wifiRSSI { metricRow("Signal (RSSI)", "\(rssi) dBm") }
+            if let noise = details?.wifiNoise { metricRow("Noise", "\(noise) dBm") }
+        }
+    }
+
+    private var formattedDNS: String {
+        guard let servers = details?.dnsServers, !servers.isEmpty else { return "Unavailable" }
+        return servers.joined(separator: ", ")
+    }
+
+    private var addressCard: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            sectionTitle("Address")
+            metricRow("Local IPv4", available(details?.localIPv4))
+            metricRow("Local IPv6", available(details?.localIPv6))
+            metricRow("Gateway", available(details?.gatewayIPv4))
+            metricRow("DNS servers", formattedDNS)
+        }
+    }
+
+    private var processCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Top processes")
+            if dynamicTypeSize.isAccessibilitySize {
+                Text("Process · download and upload rates")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 6) {
+                    Text("Process").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Received").frame(width: 75, alignment: .trailing)
+                    Text("Sent").frame(width: 75, alignment: .trailing)
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            }
+            if let processes = details?.topProcesses {
+                let ranked = Array(processes.sorted {
+                    networkSortableRate($0.receivedBytesPerSecond) + networkSortableRate($0.sentBytesPerSecond) >
+                    networkSortableRate($1.receivedBytesPerSecond) + networkSortableRate($1.sentBytesPerSecond)
+                }.prefix(8))
+                if ranked.isEmpty {
+                    Text("No processes reported")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(ranked, id: \.pid) { process in processRow(process) }
+                }
+            } else {
+                Text("Per-process network readings unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if details?.topProcesses != nil {
+                Text("Process rates include traffic across all network interfaces")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func processRow(_ process: NetworkProcess) -> some View {
+        let name = process.name.isEmpty ? "PID \(process.pid)" : process.name
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.subheadline.weight(.medium))
+                Text("Received \(networkRate(process.receivedBytesPerSecond))")
+                    .font(.caption).foregroundStyle(downloadColor)
+                Text("Sent \(networkRate(process.sentBytesPerSecond))")
+                    .font(.caption).foregroundStyle(uploadColor)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), process \(process.pid)")
+            .accessibilityValue("Received \(networkRate(process.receivedBytesPerSecond)), sent \(networkRate(process.sentBytesPerSecond))")
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "app.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 19, height: 19)
+                    .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 5))
+                    .accessibilityHidden(true)
+                Text(name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(networkRate(process.receivedBytesPerSecond))
+                    .foregroundStyle(downloadColor)
+                    .frame(width: 75, alignment: .trailing)
+                Text(networkRate(process.sentBytesPerSecond))
+                    .foregroundStyle(uploadColor)
+                    .frame(width: 75, alignment: .trailing)
+            }
+            .font(.caption)
+            .monospacedDigit()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), process \(process.pid)")
+            .accessibilityValue("Received \(networkRate(process.receivedBytesPerSecond)), sent \(networkRate(process.sentBytesPerSecond))")
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        HStack(spacing: 9) {
+            Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .tracking(1.4)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityAddTraits(.isHeader)
+            Rectangle().fill(Color.secondary.opacity(0.22)).frame(height: 1)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func legend(_ name: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(name).font(.caption2).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func metricRow(_ title: String, _ value: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(value)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).foregroundStyle(.secondary)
+                Text(value).fontWeight(.medium).monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.subheadline)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func available(_ text: String?) -> String {
+        guard let text, !text.isEmpty else { return "Unavailable" }
+        return text
+    }
+
+    private func capture(_ snapshot: MetricSnapshot?) {
+        guard let snapshot else { return }
+        if let point = NetworkRatePoint(snapshot: snapshot) {
+            if localSamples.last?.timestamp == point.timestamp { localSamples[localSamples.count - 1] = point }
+            else { localSamples.append(point) }
+            if localSamples.count > 180 { localSamples.removeFirst(localSamples.count - 180) }
+        }
+        if let reachable = snapshot.networkDetails?.connectivityStatus {
+            let point = NetworkConnectivityPoint(timestamp: snapshot.timestamp, reachable: reachable)
+            if connectivitySamples.last?.timestamp == point.timestamp {
+                connectivitySamples[connectivitySamples.count - 1] = point
+            } else { connectivitySamples.append(point) }
+            if connectivitySamples.count > 64 { connectivitySamples.removeFirst(connectivitySamples.count - 64) }
+        }
+    }
+}
+
+private func networkRate(_ rate: Double?) -> String {
+    guard let rate, rate.isFinite, rate >= 0 else { return "—" }
+    if rate == 0 { return "0 B/s" }
+    return MetricFormat.rate(rate)
+}
+
+private func networkSortableRate(_ rate: Double?) -> Double {
+    guard let rate, rate.isFinite, rate >= 0 else { return 0 }
+    return rate
+}
+
+/// Draw two separate colored paths so independent series cannot inherit each other's color.
+private struct NetworkActivityPlot: View {
+    let samples: [NetworkRatePoint]
+    let downloadColor: Color
+    let uploadColor: Color
+
+    var body: some View {
+        // Each direction has its own visual scale: 9 KB/s downloads must remain
+        // visible beside a 5 MB/s upload. Displayed values stay in real B/s.
+        let downloadScale = diskChartScale(samples.compactMap(\.received))
+        let uploadScale = diskChartScale(samples.compactMap(\.sent))
+        Canvas { context, size in
+            let baseline = size.height / 2
+            var zeroLine = Path()
+            zeroLine.move(to: CGPoint(x: 0, y: baseline))
+            zeroLine.addLine(to: CGPoint(x: size.width, y: baseline))
+            context.stroke(zeroLine, with: .color(.secondary.opacity(0.30)), lineWidth: 0.8)
+
+            drawSeries(context, size: size, scale: uploadScale, receives: false, color: uploadColor)
+            drawSeries(context, size: size, scale: downloadScale, receives: true, color: downloadColor)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func drawSeries(_ context: GraphicsContext, size: CGSize, scale: Double,
+                            receives: Bool, color: Color) {
+        guard let firstTime = samples.first?.timestamp.timeIntervalSince1970,
+              let lastTime = samples.last?.timestamp.timeIntervalSince1970 else { return }
+        let elapsed = max(0.001, lastTime - firstTime)
+        let baseline = size.height / 2
+        let height = baseline - 7
+        var run: [CGPoint] = []
+
+        func paint(_ values: [CGPoint]) {
+            guard !values.isEmpty else { return }
+            var line = Path()
+            line.addLines(values)
+            if values.count == 1, let point = values.first {
+                line.addLine(to: CGPoint(x: point.x + 0.5, y: point.y))
+            }
+            var area = line
+            if let first = values.first, let last = values.last {
+                area.addLine(to: CGPoint(x: last.x, y: baseline))
+                area.addLine(to: CGPoint(x: first.x, y: baseline))
+                area.closeSubpath()
+            }
+            context.fill(area, with: .color(color.opacity(receives ? 0.62 : 0.58)))
+            context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: 1.7,
+                                                                       lineCap: .round, lineJoin: .round))
+        }
+
+        for (index, sample) in samples.enumerated() {
+            let value = receives ? sample.received : sample.sent
+            if let value {
+                // Large chronological gaps start a new path, preventing disconnected periods from
+                // looking like continuous measured traffic.
+                if index > 0, !run.isEmpty {
+                    let prior = samples[index - 1].timestamp.timeIntervalSince1970
+                    let gap = sample.timestamp.timeIntervalSince1970 - prior
+                    let typicalGap = max(2, elapsed / Double(max(1, samples.count - 1)))
+                    if gap > typicalGap * 4 { paint(run); run.removeAll() }
+                }
+                let x = size.width * (sample.timestamp.timeIntervalSince1970 - firstTime) / elapsed
+                let magnitude = height * min(1, value / scale)
+                let y = baseline + (receives ? magnitude : -magnitude)
+                run.append(CGPoint(x: x, y: y))
+            } else {
+                paint(run)
+                run.removeAll()
+            }
+        }
+        paint(run)
+    }
+}
+
+/// A successful ICMP check is one green bar; a failed check is one red tick.
+/// Unknown checks have no bar, and history starts with the first real result.
+private struct NetworkConnectivityPlot: View {
+    let samples: [NetworkConnectivityPoint]
+
+    var body: some View {
+        Canvas { context, size in
+            guard !samples.isEmpty else { return }
+            let count = min(samples.count, 64)
+            let shown = Array(samples.suffix(count))
+            let spacing = size.width / CGFloat(max(1, count))
+            let width = max(1, min(4, spacing - 1.2))
+            for (index, sample) in shown.enumerated() {
+                let x = CGFloat(index) * spacing + max(0, (spacing - width) / 2)
+                let height: CGFloat = sample.reachable ? size.height - 8 : 9
+                let bar = CGRect(x: x, y: size.height - height - 4, width: width, height: height)
+                context.fill(Path(roundedRect: bar, cornerRadius: width / 2),
+                             with: .color(sample.reachable ? .green : .red.opacity(0.70)))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
