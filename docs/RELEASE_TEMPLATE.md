@@ -30,7 +30,7 @@ One or two sentences describing what this release delivers.
 
 ## Download
 
-- **macOS:** `StatsCompanion-vX.Y.Z-macOS-universal.zip` (Apple Silicon and Intel).
+- **macOS:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
 - See the [README](https://github.com/ishtiaq156/stats-for-ios#macos-download) for requirements, installation, and pairing instructions.
 
 **Full Changelog:** Link to the comparison between previous and current tags, or to the commit history for the first release.

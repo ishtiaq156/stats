@@ -30,13 +30,15 @@ The Mac companion and iPhone dashboard are designed as one cohesive local monito
 
 ### macOS download
 
-**Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS ZIP from the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases):
+**Stats Companion** is available for macOS 14 or later on Apple Silicon and Intel Macs. Download the universal macOS DMG from the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases):
 
-1. Unzip the download and move `StatsCompanion.app` into Applications.
+1. Open the DMG and drag `StatsCompanion.app` to the **Applications** shortcut.
 2. Launch Stats Companion from Applications, then open its menu bar panel. Install the Stats iPhone app from Xcode using the steps in [Get started](#get-started).
 3. Connect the Mac and iPhone to the same reachable local network. Select the Mac on your iPhone and enter the five-digit passcode from the Mac menu.
 
 This download contains the Mac companion only. Move the app to Applications **before enabling Open at login**.
+
+The DMG includes a hidden folder with the required open-source license notices. It does not include a separate installation README.
 
 The current build is signed with an Apple Development identity, without Developer ID notarization. On Macs where Gatekeeper blocks the downloaded app, use the app-specific **Open** / **Open Anyway** control in macOS after verifying the source of the download. Do not disable Gatekeeper globally. Keep this preview on a trusted local network while protocol review and broader testing continue.
 
