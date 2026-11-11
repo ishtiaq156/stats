@@ -44,7 +44,7 @@ The current build is signed with an Apple Development identity, without Develope
 
 ### iPhone download
 
-**Stats for iPhone** is available as an **unsigned IPA** on the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases). Download `Stats-v0.3.0-iOS-unsigned.ipa` for the current iPhone build (**0.3.0, build 3; iOS 17+**).
+**Stats for iPhone** is available as an **unsigned IPA** on the [GitHub Releases page](https://github.com/ishtiaq156/stats-for-ios/releases). Download `Stats-v0.3.0-iOS.ipa` for the current iPhone build (**0.3.0, build 3; iOS 17+**).
 
 The IPA contains only `Payload/Stats.app`. It has **no code signature or provisioning profile**, so it cannot be installed directly on a stock iPhone. Sign the IPA with your own credentials through a compatible sideloading tool (such as SideStore) before installation, or build and sign the app in Xcode using a free Personal Team. The iPhone and companion must share a reachable local network for pairing.
 
