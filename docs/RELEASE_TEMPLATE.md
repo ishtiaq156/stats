@@ -2,6 +2,16 @@
 Reusable GitHub release body. The tag vX.Y.Z identifies the project release.
 Mac Companion and iPhone Stats maintain independent app versions and builds;
 use each component's actual version in its asset filename and download label.
+Before releasing a meaningful batch of commits, decide whether each affected
+app needs a version bump. Increase MARKETING_VERSION and CURRENT_PROJECT_VERSION
+for every changed app in project.yml, regenerate Stats.xcodeproj, and add a
+new dated CompanionRelease.notes entry for a Mac release. Include mobile changes
+in release notes, too. Keep released versions and binaries immutable.
+Once development changes pass their relevant builds/tests, commit and push
+the reviewed source to origin/main. For versioned distributions, publish a
+new release/tag only after the exact versioned artifacts have been verified.
+An updated Mac build is needed before the new menu bar update-arrow can appear:
+the published v0.3.2 binary has no arrow and checks only stable releases.
 The release status is set in GitHub (Pre-release or Latest), not in the title,
 tag, download filename, or in-app changelog. Once a version/tag is published,
 use a new version for any changed binary rather than silently replacing it.
@@ -33,6 +43,6 @@ One or two sentences describing what this release delivers.
 
 - **Mac companion · X.Y.Z:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
 - **iPhone app · A.B.C:** `Stats-vA.B.C-iOS.ipa` (iOS 17+, arm64; unsigned, requires signing before installation).
-- See the [README](https://github.com/ishtiaq156/stats#requirements) for installation and pairing instructions.
+- See the [README](https://github.com/ishtiaq156/stats#quick-start) for installation and pairing instructions.
 
 **Full Changelog:** Link to the comparison between previous and current tags, or to the commit history for the first release.

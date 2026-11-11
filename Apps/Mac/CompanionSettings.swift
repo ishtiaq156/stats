@@ -807,6 +807,12 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.3", date: "November 11, 2026", changes: [
+            "Show a circular up-arrow beside the Stats menu bar icon when a newer Mac version is available.",
+            "Check for new releases quietly at launch and every six hours, including pre-releases.",
+            "Keep an available update visible if a later network check temporarily fails.",
+            "Update repository and support links following the move to the Stats project."
+        ]),
         .init(version: "0.3.2", date: "October 30, 2026", changes: [
             "Reworked the Mac Settings window around the passcode, connection status, actions, and visibility controls.",
             "Refined compact menu spacing, typography, glass controls, and passcode copy and refresh feedback.",
