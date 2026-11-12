@@ -24,6 +24,7 @@
 		BCFE2659D654307ECC8E8CDC /* PasscodeEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79FB9D9AD51A36EB5C36D658 /* PasscodeEntryView.swift */; };
 		C5AB1F21DAB5548BE1F90CFD /* MetricDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82BE6DD0B9A14AA0F40074CE /* MetricDetailView.swift */; };
 		CBD28DC2C4BCBD1B9108414A /* PhoneRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E368B81354B29CC1F20C26 /* PhoneRegistry.swift */; };
+		CC5FBE4B43B13F2370C31972 /* CompanionUpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5662887A673587B9541EA1B /* CompanionUpdateInstaller.swift */; };
 		D3E95D8F617C4BA9B269B8B9 /* StatsCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 046C90627FB409BCB3920051 /* StatsCompanionApp.swift */; };
 		E9E3203B623747160BDFD00B /* MetricServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87773BDBD5B2F482FAA6F350 /* MetricServer.swift */; };
 		F28F03F5E684D86C23BADFFB /* CompanionTabNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56BE6EE9486BF023522A1F3E /* CompanionTabNavigation.swift */; };
@@ -58,6 +59,7 @@
 		B4E04B1865AC40461E74E297 /* SystemSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSampler.swift; sourceTree = "<group>"; };
 		D4B2F6D700CBD3A47795B9D6 /* NearbyMacStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyMacStore.swift; sourceTree = "<group>"; };
 		E034BC406ABF473BE7713CAA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E5662887A673587B9541EA1B /* CompanionUpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionUpdateInstaller.swift; sourceTree = "<group>"; };
 		F7494C14876FB82B53ADC99A /* CompanionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -136,6 +138,7 @@
 				F7494C14876FB82B53ADC99A /* CompanionSettings.swift */,
 				56BE6EE9486BF023522A1F3E /* CompanionTabNavigation.swift */,
 				65FB94219F41EFCEE9A26A9C /* CompanionUnavailableHelp.swift */,
+				E5662887A673587B9541EA1B /* CompanionUpdateInstaller.swift */,
 				4B37B970C1622C95755EF5BD /* CompanionUpdateRelease.swift */,
 				E034BC406ABF473BE7713CAA /* Info.plist */,
 				87773BDBD5B2F482FAA6F350 /* MetricServer.swift */,
@@ -269,6 +272,7 @@
 				127050C6354A8951F0F3AD7C /* CompanionSettings.swift in Sources */,
 				F28F03F5E684D86C23BADFFB /* CompanionTabNavigation.swift in Sources */,
 				65D63E8B30BA504C4B26CCDA /* CompanionUnavailableHelp.swift in Sources */,
+				CC5FBE4B43B13F2370C31972 /* CompanionUpdateInstaller.swift in Sources */,
 				8C6642FA02304134D53E4DEF /* CompanionUpdateRelease.swift in Sources */,
 				E9E3203B623747160BDFD00B /* MetricServer.swift in Sources */,
 				CBD28DC2C4BCBD1B9108414A /* PhoneRegistry.swift in Sources */,
@@ -326,7 +330,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -335,7 +339,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.7;
+				MARKETING_VERSION = 0.3.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
@@ -409,7 +413,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -418,7 +422,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.7;
+				MARKETING_VERSION = 0.3.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;

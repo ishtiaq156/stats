@@ -15,7 +15,7 @@ enum CompanionUpdateState: Equatable {
     case idle
     case checking
     case upToDate
-    case available(version: String, url: URL)
+    case available(CompanionAvailableRelease)
     case failed(String)
 }
 
@@ -67,6 +67,8 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var pairingPending = false
     @Published private(set) var pairingLocked = false
     @Published private(set) var updateState: CompanionUpdateState = .idle
+    @Published private(set) var installationState: CompanionInstallationState = .idle
+    @Published private(set) var restartError: String?
     var hasUpdateAvailable: Bool {
         if case .available = updateState { return true }
         return false
@@ -84,6 +86,8 @@ final class StatsCompanionModel: ObservableObject {
     private var timer: Timer?
     private var updateCheckTimer: Timer?
     private var updateCheckInFlight = false
+    private var updateDownloadTask: Task<Void, Never>?
+    private var preparedUpdate: PreparedCompanionUpdate?
     private var server: MetricServer?
 
     init() {
@@ -235,6 +239,8 @@ final class StatsCompanionModel: ObservableObject {
     /// progress/feedback when a user presses Check for updates.
     func checkForUpdates(silent: Bool = false) {
         guard !updateCheckInFlight else { return }
+        // Keep the selected release stable throughout download/retry/install.
+        guard installationState == .idle else { return }
         updateCheckInFlight = true
         let previousState = updateState
         if !silent { updateState = .checking }
@@ -259,7 +265,7 @@ final class StatsCompanionModel: ObservableObject {
                 let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
                 let newer = try CompanionUpdateRelease.newest(in: data, newerThan: current)
                 if let newer {
-                    updateState = .available(version: newer.version, url: newer.url)
+                    updateState = .available(newer)
                 } else if silent {
                     updateState = .idle
                 } else {
@@ -286,6 +292,79 @@ final class StatsCompanionModel: ObservableObject {
         Task {
             try? await Task.sleep(for: .seconds(2.5))
             if updateState == .upToDate { updateState = .idle }
+        }
+    }
+
+    func downloadUpdate() {
+        guard case .available(let release) = updateState else { return }
+        switch installationState {
+        case .idle, .failed: break
+        case .downloading, .ready, .installing: return
+        }
+        if let old = preparedUpdate { CompanionUpdateInstaller.discard(old) }
+        preparedUpdate = nil
+        installationState = .downloading(nil)
+        updateDownloadTask = Task {
+            do {
+                let update = try await CompanionUpdateInstaller.prepare(release) { fraction in
+                    if case .downloading = self.installationState {
+                        self.installationState = .downloading(fraction)
+                    }
+                }
+                if Task.isCancelled {
+                    CompanionUpdateInstaller.discard(update)
+                    return
+                }
+                preparedUpdate = update
+                installationState = .ready
+            } catch {
+                guard !Task.isCancelled else { return }
+                installationState = .failed(error.localizedDescription)
+            }
+            updateDownloadTask = nil
+        }
+    }
+
+    func cancelUpdateDownload() {
+        updateDownloadTask?.cancel()
+        updateDownloadTask = nil
+        installationState = .idle
+    }
+
+    func installUpdate() {
+        guard let preparedUpdate else { return }
+        switch installationState {
+        case .ready, .failed: break
+        case .idle, .downloading, .installing: return
+        }
+        installationState = .installing
+        Task {
+            do {
+                try await CompanionUpdateInstaller.installAndRelaunch(preparedUpdate)
+                NSApp.terminate(nil)
+            } catch {
+                installationState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    var hasDownloadedInstaller: Bool { preparedUpdate != nil }
+
+    func openDownloadedInstaller() {
+        guard let preparedUpdate else { return }
+        if preparedUpdate.packageURL.pathExtension == "dmg" {
+            NSWorkspace.shared.open(preparedUpdate.packageURL)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([preparedUpdate.packageURL])
+        }
+    }
+
+    func restartCompanion() {
+        do {
+            try CompanionUpdateInstaller.restart()
+            NSApp.terminate(nil)
+        } catch {
+            restartError = error.localizedDescription
         }
     }
 

@@ -27,9 +27,16 @@ struct CompanionSettings: View {
         }
         if model.localAddress != nil { actions.append(.connectionAddress) }
         if model.needsWiFiLocationAccess { actions.append(.wifiLocation) }
-        switch model.updateState {
-        case .idle, .available, .failed: actions.append(.updates)
-        case .checking, .upToDate: break
+        switch model.installationState {
+        case .downloading, .ready, .failed:
+            actions.append(.updates)
+        case .installing:
+            break
+        case .idle:
+            switch model.updateState {
+            case .idle, .available, .failed: actions.append(.updates)
+            case .checking, .upToDate: break
+            }
         }
         actions += [.website, .about, .changelog]
         if !(model.dockVisible && !model.menuBarVisible) { actions.append(.dock) }
@@ -80,10 +87,16 @@ struct CompanionSettings: View {
         case .wifiLocation:
             model.requestWiFiLocationAccess()
         case .updates:
-            if case .available(_, let url) = model.updateState {
-                NSWorkspace.shared.open(url)
-            } else {
-                model.checkForUpdates()
+            switch model.installationState {
+            case .downloading: model.cancelUpdateDownload()
+            case .ready: model.installUpdate()
+            case .installing: return false
+            case .failed:
+                if model.hasDownloadedInstaller { model.installUpdate() }
+                else { model.downloadUpdate() }
+            case .idle:
+                if case .available = model.updateState { model.downloadUpdate() }
+                else { model.checkForUpdates() }
             }
         case .website:
             open("https://github.com/ishtiaq156/stats")
@@ -458,24 +471,51 @@ struct CompanionSettings: View {
 
     private var updateRow: some View {
         Group {
-            switch model.updateState {
+            switch model.installationState {
+            case .downloading(let progress):
+                actionRow(progress.map { "Downloading… \(Int($0 * 100))% · Cancel" }
+                          ?? "Downloading… · Cancel", symbol: "xmark.circle") {
+                    model.cancelUpdateDownload()
+                }.focused($settingsFocus, equals: .updates)
+            case .ready:
+                actionRow("Install update & Restart", symbol: "arrow.clockwise") {
+                    model.installUpdate()
+                }.focused($settingsFocus, equals: .updates)
+            case .installing:
+                statusActionRow("Preparing to restart…", spinner: true)
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 0) {
+                    actionRow(model.hasDownloadedInstaller ? "Retry install" : "Retry download",
+                              symbol: "arrow.clockwise") {
+                        if model.hasDownloadedInstaller { model.installUpdate() }
+                        else { model.downloadUpdate() }
+                    }.focused($settingsFocus, equals: .updates)
+                    Text(message).font(.system(size: 11)).foregroundStyle(.red)
+                        .padding(.horizontal, 12).padding(.bottom, 8)
+                    if model.hasDownloadedInstaller {
+                        actionRow("Open downloaded installer", symbol: "folder") {
+                            model.openDownloadedInstaller()
+                        }
+                    }
+                }
             case .idle:
-                actionRow("Check for updates") { model.checkForUpdates() }
-                    .focused($settingsFocus, equals: .updates)
-            case .checking:
-                statusActionRow("Checking…", spinner: true)
-            case .upToDate:
-                statusActionRow("Up to date", symbol: "checkmark")
-            case .available(let version, let url):
-                actionRow("Download version \(version)", symbol: "arrow.down.circle") {
-                    NSWorkspace.shared.open(url)
+                switch model.updateState {
+                case .idle:
+                    actionRow("Check for updates") { model.checkForUpdates() }
+                        .focused($settingsFocus, equals: .updates)
+                case .checking:
+                    statusActionRow("Checking…", spinner: true)
+                case .upToDate:
+                    statusActionRow("Up to date", symbol: "checkmark")
+                case .available(let release):
+                    actionRow("Download version \(release.version)", symbol: "arrow.down.circle") {
+                        model.downloadUpdate()
+                    }.focused($settingsFocus, equals: .updates)
+                case .failed:
+                    actionRow("Couldn’t check · Retry", symbol: "exclamationmark.circle") {
+                        model.checkForUpdates()
+                    }.focused($settingsFocus, equals: .updates)
                 }
-                .focused($settingsFocus, equals: .updates)
-            case .failed:
-                actionRow("Couldn’t check · Retry", symbol: "exclamationmark.circle") {
-                    model.checkForUpdates()
-                }
-                .focused($settingsFocus, equals: .updates)
             }
         }
     }
@@ -923,6 +963,12 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.8", date: "November 11, 2026", changes: [
+            "Download Mac updates with progress directly from the menu bar.",
+            "Verify the release checksum and app signature before offering Install & Restart.",
+            "Install in place and relaunch automatically, with retry and a manual installer fallback.",
+            "Restart Stats Companion directly from the menu bar."
+        ]),
         .init(version: "0.3.7", date: "November 11, 2026", changes: [
             "Reserve space for the menu bar update arrow before the first update check so macOS cannot clip it when a newer release becomes available."
         ]),

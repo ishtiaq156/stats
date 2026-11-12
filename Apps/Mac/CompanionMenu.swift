@@ -5,11 +5,16 @@ private enum MenuAction {
     case copyPasscode
     case refreshPasscode
     case checkUpdates
+    case downloadUpdate
+    case cancelDownload
+    case installUpdate
+    case openInstaller
     case website
     case about
     case changelog
     case openAtLogin
     case settings
+    case restart
     case quit
 }
 
@@ -82,7 +87,12 @@ struct CompanionMenu: View {
             }
             row("Settings", action: .settings, shortcut: "⌘,")
             menuDivider
+            row("Restart Stats Companion", action: .restart, symbol: "arrow.clockwise")
             row("Quit Stats Companion", action: .quit, shortcut: "⌘Q")
+            if let error = model.restartError {
+                Text(error).font(.caption).foregroundStyle(.red)
+                    .padding(.horizontal, 10).padding(.bottom, 6)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -231,19 +241,51 @@ struct CompanionMenu: View {
 
     private var updateRow: some View {
         Group {
-            switch model.updateState {
+            switch model.installationState {
+            case .downloading(let fraction):
+                VStack(alignment: .leading, spacing: 4) {
+                    CompanionRow(title: "Downloading update…", highlighted: false,
+                                 enabled: false, showsSpinner: fraction == nil) {}
+                    if let fraction {
+                        ProgressView(value: fraction)
+                            .accessibilityLabel("Update download")
+                            .padding(.horizontal, 7)
+                    }
+                    row("Cancel download", action: .cancelDownload, symbol: "xmark.circle")
+                }
+            case .ready:
+                row("Install update & Restart", action: .installUpdate, symbol: "arrow.clockwise")
+            case .installing:
+                CompanionRow(title: "Preparing to restart…", highlighted: false,
+                             enabled: false, showsSpinner: true) {}
+            case .failed(let error):
+                VStack(alignment: .leading, spacing: 3) {
+                    row(model.hasDownloadedInstaller ? "Retry install" : "Retry download",
+                        action: model.hasDownloadedInstaller ? .installUpdate : .downloadUpdate,
+                        symbol: "arrow.clockwise")
+                    if model.hasDownloadedInstaller {
+                        row("Open downloaded installer", action: .openInstaller, symbol: "folder")
+                    }
+                    Text(error).font(.system(size: 11)).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 7).padding(.bottom, 5)
+                }
             case .idle:
-                row("Check for updates", action: .checkUpdates)
-            case .checking:
-                CompanionRow(title: "Checking…", symbol: "progress",
-                             highlighted: false, enabled: false, showsSpinner: true) {}
-            case .upToDate:
-                CompanionRow(title: "Up to date", symbol: "checkmark",
-                             highlighted: false, enabled: false) {}
-            case .available(let version, _):
-                row("Update available", action: .checkUpdates, trailing: "v\(version)", symbol: "arrow.up.right")
-            case .failed:
-                row("Couldn’t check · Retry", action: .checkUpdates, symbol: "exclamationmark.circle")
+                switch model.updateState {
+                case .idle:
+                    row("Check for updates", action: .checkUpdates)
+                case .checking:
+                    CompanionRow(title: "Checking…", symbol: "progress",
+                                 highlighted: false, enabled: false, showsSpinner: true) {}
+                case .upToDate:
+                    CompanionRow(title: "Up to date", symbol: "checkmark",
+                                 highlighted: false, enabled: false) {}
+                case .available(let release):
+                    row("Download update", action: .downloadUpdate,
+                        trailing: "v\(release.version)", symbol: "arrow.down.circle")
+                case .failed:
+                    row("Couldn’t check · Retry", action: .checkUpdates, symbol: "exclamationmark.circle")
+                }
             }
         }
     }
@@ -276,10 +318,24 @@ struct CompanionMenu: View {
         } else if model.pairingLocked {
             result.append(.refreshPasscode)
         }
-        if model.updateState != .checking && model.updateState != .upToDate {
-            result.append(.checkUpdates)
+        switch model.installationState {
+        case .downloading:
+            result.append(.cancelDownload)
+        case .ready:
+            result.append(.installUpdate)
+        case .installing:
+            break
+        case .failed:
+            result.append(model.hasDownloadedInstaller ? .installUpdate : .downloadUpdate)
+            if model.hasDownloadedInstaller { result.append(.openInstaller) }
+        case .idle:
+            switch model.updateState {
+            case .idle, .failed: result.append(.checkUpdates)
+            case .available: result.append(.downloadUpdate)
+            case .checking, .upToDate: break
+            }
         }
-        result += [.website, .about, .changelog, .openAtLogin, .settings, .quit]
+        result += [.website, .about, .changelog, .openAtLogin, .settings, .restart, .quit]
         return result
     }
 
@@ -331,11 +387,15 @@ struct CompanionMenu: View {
             copiedPasscode = false
             model.refreshPasscode()
         case .checkUpdates:
-            if case .available(_, let url) = model.updateState {
-                NSWorkspace.shared.open(url)
-            } else {
-                model.checkForUpdates()
-            }
+            model.checkForUpdates()
+        case .downloadUpdate:
+            model.downloadUpdate()
+        case .cancelDownload:
+            model.cancelUpdateDownload()
+        case .installUpdate:
+            model.installUpdate()
+        case .openInstaller:
+            model.openDownloadedInstaller()
         case .website:
             open("https://github.com/ishtiaq156/stats")
         case .about:
@@ -346,6 +406,8 @@ struct CompanionMenu: View {
             model.setOpenAtLogin(!model.openAtLogin)
         case .settings:
             showSettings(.home)
+        case .restart:
+            model.restartCompanion()
         case .quit:
             NSApp.terminate(nil)
         }

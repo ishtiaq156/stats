@@ -34,17 +34,11 @@ archs=$(/usr/bin/lipo -archs "$app/Contents/MacOS/StatsCompanion")
 mkdir -p dist
 work="$(mktemp -d "$repo/dist/.dmg-work.XXXXXX")"
 stage="$work/stage"
-mountpoint="$work/mounted"
-writable="$work/writable.dmg"
-mounted=0
 cleanup() {
-  if [[ "$mounted" == 1 ]]; then
-    /usr/sbin/diskutil eject "$mountpoint" >/dev/null 2>&1 || true
-  fi
   rm -rf "$work"
 }
 trap cleanup EXIT
-mkdir -p "$stage" "$mountpoint"
+mkdir -p "$stage"
 
 /usr/bin/ditto "$app" "$stage/StatsCompanion.app"
 ln -s /Applications "$stage/Applications"
@@ -63,22 +57,14 @@ cp Native/Spake2Bridge/THIRD_PARTY_NOTICES.md "$stage/.licenses/Spake2Bridge-THI
 /usr/bin/ditto Native/Spake2Bridge/licenses "$stage/.licenses/licenses"
 
 output="$repo/dist/StatsCompanion-v$version-macOS-universal.dmg"
-# hdiutil -srcfolder does not reliably propagate the source folder's custom
-# icon flag to the image volume. Set it on the actual writable HFS+ volume,
-# then compress the image, preserving its Finder metadata for downloads.
-/usr/bin/hdiutil create -quiet -format UDRW -fs HFS+ -nospotlight \
-  -volname 'Stats Companion' -srcfolder "$stage" "$writable"
-/usr/sbin/diskutil image attach --nobrowse --mountPoint "$mountpoint" "$writable" >/dev/null
-mounted=1
-/usr/bin/SetFile -a C "$mountpoint"
-[[ "$(/usr/bin/GetFileInfo -a "$mountpoint")" == *C* ]] || {
-  echo "Mounted DMG volume did not retain its custom icon flag" >&2
-  exit 1
-}
-/usr/sbin/diskutil eject "$mountpoint" >/dev/null
-mounted=0
-/usr/bin/hdiutil convert -quiet -ov -format UDZO -imagekey zlib-level=9 \
-  -o "$output" "$writable"
+# Set the source directory's custom icon flag before imaging. Creating a
+# compressed image directly avoids diskutil writable mounts that can hang on
+# macOS 27 after a permission prompt. The app's own icon is independent.
+/usr/bin/SetFile -a C "$stage"
+/usr/bin/hdiutil create -quiet -format UDZO -fs HFS+ -nospotlight \
+  -volname 'Stats Companion' -srcfolder "$stage" "$work/ready.dmg"
+/usr/bin/hdiutil verify -quiet "$work/ready.dmg"
+/bin/mv -f "$work/ready.dmg" "$output"
 /usr/bin/hdiutil verify -quiet "$output"
 
 echo "Packaged: $output"

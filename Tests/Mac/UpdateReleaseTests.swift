@@ -6,14 +6,20 @@ struct UpdateReleaseTests {
         _ version: String,
         draft: Bool = false,
         asset: String = "StatsCompanion-v0.3.3-macOS-universal.dmg",
-        url: String? = nil
+        url: String? = nil,
+        assetURL: String? = nil,
+        digest: String? = "sha256:" + String(repeating: "a", count: 64)
     ) -> [String: Any] {
         [
             "tag_name": version,
             "html_url": url ?? "https://github.com/ishtiaq156/stats/releases/tag/\(version)",
             "draft": draft,
             "prerelease": true,
-            "assets": asset.isEmpty ? [] : [["name": asset]]
+            "assets": asset.isEmpty ? [] : [[
+                "name": asset,
+                "browser_download_url": assetURL ?? "https://github.com/ishtiaq156/stats/releases/download/\(version)/\(asset)",
+                "digest": digest as Any
+            ]]
         ]
     }
 
@@ -31,13 +37,31 @@ struct UpdateReleaseTests {
         try expect([], version: nil)
         try expect([release("v0.3.2"), release("v0.3.1")], version: nil)
         try expect([release("v0.3.3")], version: "0.3.3")
-        try expect([release("v0.4.0"), release("v0.9.0"), release("v0.10.0")], version: "0.10.0")
+        try expect([release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.dmg"),
+                    release("v0.9.0", asset: "StatsCompanion-v0.9.0-macOS-universal.dmg"),
+                    release("v0.10.0", asset: "StatsCompanion-v0.10.0-macOS-universal.dmg")], version: "0.10.0")
         try expect([release("v0.4.0", draft: true), release("v0.3.3")], version: "0.3.3")
         try expect([release("v0.4.0", asset: "")], version: nil)
         try expect([release("v0.4.0", asset: "Stats-iPhone.ipa")], version: nil)
         try expect([release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.zip")], version: "0.4.0")
+        var both = release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.dmg")
+        both["assets"] = [
+            ["name": "StatsCompanion-v0.4.0-macOS-universal.dmg",
+             "browser_download_url": "https://github.com/ishtiaq156/stats/releases/download/v0.4.0/StatsCompanion-v0.4.0-macOS-universal.dmg",
+             "digest": "sha256:" + String(repeating: "a", count: 64)],
+            ["name": "StatsCompanion-v0.4.0-macOS-universal.zip",
+             "browser_download_url": "https://github.com/ishtiaq156/stats/releases/download/v0.4.0/StatsCompanion-v0.4.0-macOS-universal.zip",
+             "digest": "sha256:" + String(repeating: "b", count: 64)]
+        ]
+        let preferred = try selected([both])
+        precondition(preferred?.assetName.hasSuffix(".zip") == true,
+                     "The in-app updater must prefer ZIP when a release includes both formats")
         try expect([release("v0.4.0-beta.1"), release("not-a-version")], version: nil)
         try expect([release("v0.4.0", url: "https://untrusted.example/releases/tag/v0.4.0")], version: nil)
+        try expect([release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.dmg",
+                           assetURL: "https://example.com/update.dmg")], version: nil)
+        try expect([release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.dmg",
+                           digest: "sha256:bad")], version: nil)
         try expect([release("v0.3.3")], from: "invalid", version: nil)
 
         do {
@@ -47,7 +71,7 @@ struct UpdateReleaseTests {
             // Expected.
         }
 
-        print("Update availability: 12 regression checks passed")
+        print("Update availability and trusted asset selection passed")
         if CommandLine.arguments.count > 1 {
             let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
             for installedVersion in ["0.3.1", "0.3.2"] {

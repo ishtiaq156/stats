@@ -44,6 +44,8 @@ One or two sentences describing what this release delivers.
 
 ## Download
 
+For Mac releases, publish both the signed universal DMG for Finder installs and the signed universal ZIP used by the inline updater. Verify each after packaging, and upload both to the same release.
+
 - **Mac companion · X.Y.Z:** `StatsCompanion-vX.Y.Z-macOS-universal.dmg` (Apple Silicon and Intel).
 - **iPhone app · A.B.C:** `Stats-vA.B.C-iOS.ipa` (iOS 17+, arm64; unsigned, requires signing before installation).
 - See the [README](https://github.com/ishtiaq156/stats#quick-start) for installation and pairing instructions.

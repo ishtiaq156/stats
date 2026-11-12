@@ -25,6 +25,8 @@ Stats lets you check what your Mac is doing from a paired device on the same loc
 
 ## Downloads
 
+The Mac release also includes a signed ZIP archive. Companion prefers this archive for in-menu updates so it can install without mounting a disk image; the DMG remains the normal first-install option.
+
 Get both apps from the [GitHub Releases](https://github.com/ishtiaq156/stats/releases) page. They share a repository but have independent version numbers.
 
 | App | Current supported platform | Download |
@@ -36,6 +38,8 @@ Get both apps from the [GitHub Releases](https://github.com/ishtiaq156/stats/rel
 > The mobile IPA must be **signed before installation** using a compatible sideloading tool or your own Apple development signing. The Mac DMG currently uses an Apple Development signature and is **not notarized**; macOS may require the app-specific **Open Anyway** option. Do not disable Gatekeeper globally.
 
 ## Quick start
+
+After the first Mac installation, future releases can be downloaded and installed from **Stats Companion's menu bar** using **Download update** and **Install update & Restart**. If macOS prevents installation into the current application folder, choose **Open downloaded installer** from the menu to finish manually.
 
 1. Download the **Stats Companion** DMG, open it, and drag `StatsCompanion.app` to **Applications**.
 2. Install **Stats** on a supported mobile device: sign the downloaded IPA with your own credentials, or build and install it through Xcode using a free Personal Team.
