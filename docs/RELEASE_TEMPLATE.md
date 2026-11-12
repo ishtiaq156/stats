@@ -8,8 +8,11 @@ for every changed app in project.yml, regenerate Stats.xcodeproj, and add a
 new dated CompanionRelease.notes entry for a Mac release. Include mobile changes
 in release notes, too. Keep released versions and binaries immutable.
 Once development changes pass their relevant builds/tests, commit and push
-the reviewed source to origin/main. For versioned distributions, publish a
-new release/tag only after the exact versioned artifacts have been verified.
+the reviewed source to origin/main. User policy: every version bump must also
+finish with a published GitHub release and pushed version tag containing the
+verified installers and release notes. Never stop at a source-only push when
+a version was bumped. For versioned distributions, publish the new release/tag
+only after the exact versioned artifacts have been verified.
 An updated Mac build is needed before the new menu bar update-arrow can appear:
 the published v0.3.2 binary has no arrow and checks only stable releases.
 The release status is set in GitHub (Pre-release or Latest), not in the title,
