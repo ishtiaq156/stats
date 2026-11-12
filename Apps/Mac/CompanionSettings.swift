@@ -6,6 +6,7 @@ struct CompanionSettings: View {
     @State private var copiedPasscode = false
     @State private var copyFeedbackTask: Task<Void, Never>?
     @State private var phoneToRevoke: PairedPhone?
+    @State private var phoneToRename: PairedPhone?
     @State private var showingConnectionAddress = false
     @State private var keyboardNavigationActive = false
     @FocusState private var settingsFocus: SettingsFocus?
@@ -14,7 +15,7 @@ struct CompanionSettings: View {
         case copyPasscode, refreshPasscode, connectionAddress, wifiLocation, updates
         case website, about, changelog, dock, menuBar, login
         case quit, feedback, changelogBack
-        case revoke(UUID)
+        case pairedPhones, pairedPhonesBack, rename(UUID), revoke(UUID)
     }
 
     private var homeFocusOrder: [SettingsFocus] {
@@ -34,14 +35,22 @@ struct CompanionSettings: View {
         if !(model.dockVisible && !model.menuBarVisible) { actions.append(.dock) }
         if !(model.menuBarVisible && !model.dockVisible) { actions.append(.menuBar) }
         actions.append(.login)
-        actions += model.pairedPhones.map { .revoke($0.id) }
+        if !model.pairedPhones.isEmpty { actions.append(.pairedPhones) }
         actions += [.quit, .feedback]
         return actions
     }
 
+    private var pageFocusOrder: [SettingsFocus] {
+        switch model.settingsPage {
+        case .home: homeFocusOrder
+        case .changelog: [.changelogBack]
+        case .pairedPhones:
+            [.pairedPhonesBack] + model.pairedPhones.flatMap { [.rename($0.id), .revoke($0.id)] }
+        }
+    }
+
     private func moveSettingsFocus(backward: Bool) {
-        let actions: [SettingsFocus] = model.settingsPage == .changelog
-            ? [.changelogBack] : homeFocusOrder
+        let actions = pageFocusOrder
         guard !actions.isEmpty else { return }
         guard let settingsFocus, let index = actions.firstIndex(of: settingsFocus) else {
             self.settingsFocus = backward ? actions.last : actions.first
@@ -55,10 +64,9 @@ struct CompanionSettings: View {
     /// doesn't designate an individual plain-style button as the default.
     /// Pointer, VoiceOver, and native button actions remain unchanged.
     private func activateFocusedSetting() -> Bool {
-        let actions: [SettingsFocus] = model.settingsPage == .changelog
-            ? [.changelogBack] : homeFocusOrder
+        let actions = pageFocusOrder
         guard keyboardNavigationActive,
-              !showingConnectionAddress, phoneToRevoke == nil,
+              !showingConnectionAddress, phoneToRevoke == nil, phoneToRename == nil,
               let focus = settingsFocus, actions.contains(focus) else { return false }
 
         switch focus {
@@ -83,6 +91,8 @@ struct CompanionSettings: View {
             showAbout()
         case .changelog:
             model.settingsPage = .changelog
+        case .pairedPhones:
+            model.settingsPage = .pairedPhones
         case .dock:
             model.setDockVisible(!model.dockVisible)
         case .menuBar:
@@ -95,6 +105,11 @@ struct CompanionSettings: View {
             open("https://github.com/ishtiaq156/stats/issues/new")
         case .changelogBack:
             model.settingsPage = .home
+        case .pairedPhonesBack:
+            model.settingsPage = .home
+        case .rename(let id):
+            guard let phone = model.pairedPhones.first(where: { $0.id == id }) else { return false }
+            phoneToRename = phone
         case .revoke(let id):
             guard let phone = model.pairedPhones.first(where: { $0.id == id }) else { return false }
             phoneToRevoke = phone
@@ -107,6 +122,7 @@ struct CompanionSettings: View {
             switch model.settingsPage {
             case .home: settingsHome
             case .changelog: changelogPage
+            case .pairedPhones: pairedPhonesPage
             }
         }
         // The native titlebar adds roughly 28 points to the content height.
@@ -116,7 +132,7 @@ struct CompanionSettings: View {
         .background(SettingsWindowConfigurator())
         .background(CompanionTabNavigation(
             onTab: { backward in
-                guard !showingConnectionAddress, phoneToRevoke == nil else { return false }
+                guard !showingConnectionAddress, phoneToRevoke == nil, phoneToRename == nil else { return false }
                 keyboardNavigationActive = true
                 moveSettingsFocus(backward: backward)
                 return true
@@ -135,9 +151,17 @@ struct CompanionSettings: View {
             settingsFocus = nil
         }
         .onChange(of: model.settingsPage) { _, page in
-            settingsFocus = keyboardNavigationActive
-                ? (page == .changelog ? .changelogBack : .changelog)
-                : nil
+            guard keyboardNavigationActive else { settingsFocus = nil; return }
+            switch page {
+            case .home: settingsFocus = .changelog
+            case .changelog: settingsFocus = .changelogBack
+            case .pairedPhones: settingsFocus = .pairedPhonesBack
+            }
+        }
+        .sheet(item: $phoneToRename) { phone in
+            RenamePairedPhoneSheet(phone: phone) { name in
+                model.renamePhone(phone.id, to: name)
+            }
         }
         .alert("Revoke phone access?", isPresented: Binding(
             get: { phoneToRevoke != nil },
@@ -236,7 +260,13 @@ struct CompanionSettings: View {
                     }
 
                     if !model.pairedPhones.isEmpty {
-                        pairedPhonesSection
+                        card {
+                            actionRow("Paired phones (\(model.pairedPhones.count))",
+                                      symbol: "chevron.right", height: 50) {
+                                model.settingsPage = .pairedPhones
+                            }
+                            .focused($settingsFocus, equals: .pairedPhones)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -450,48 +480,84 @@ struct CompanionSettings: View {
         }
     }
 
-    private var pairedPhonesSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Paired phones")
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.leading, 10)
-            card {
+    private var pairedPhonesPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
                 if model.pairedPhones.isEmpty {
                     Text("No phones paired yet.")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(11)
+                        .padding(14)
                 } else {
-                    ForEach(model.pairedPhones) { phone in
-                        HStack(alignment: .center, spacing: 10) {
-                            Image(systemName: phone.isConnected ? "iphone.circle.fill" : "iphone")
-                                .font(.system(size: 17))
-                                .foregroundStyle(phone.isConnected ? Color.green : Color.secondary)
-                                .frame(width: 22)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(phone.name)
-                                    .font(.system(size: 13))
-                                    .lineLimit(2)
-                                Text(phone.isConnected ? "Connected" :
-                                     (phone.lastSeen.map { "Last active \($0.formatted())" } ?? "Never active"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    Text("Rename a phone to recognize it on this Mac, or revoke its access.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 10)
+                    card {
+                        ForEach(model.pairedPhones) { phone in
+                            HStack(alignment: .center, spacing: 10) {
+                                Image(systemName: phone.isConnected ? "iphone.circle.fill" : "iphone")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(phone.isConnected ? Color.green : Color.secondary)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(phone.name)
+                                        .font(.system(size: 13))
+                                        .lineLimit(2)
+                                    Text(phone.isConnected ? "Connected" :
+                                         (phone.lastSeen.map { "Last active \($0.formatted())" } ?? "Never active"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Rename") { phoneToRename = phone }
+                                    .buttonStyle(.bordered)
+                                    .focusable()
+                                    .focusEffectDisabled(!keyboardNavigationActive)
+                                    .focused($settingsFocus, equals: .rename(phone.id))
+                                Button("Revoke", role: .destructive) { phoneToRevoke = phone }
+                                    .buttonStyle(.bordered)
+                                    .focusable()
+                                    .focusEffectDisabled(!keyboardNavigationActive)
+                                    .focused($settingsFocus, equals: .revoke(phone.id))
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("Revoke", role: .destructive) { phoneToRevoke = phone }
-                                .buttonStyle(.bordered)
-                                .focusable()
-                                .focusEffectDisabled(!keyboardNavigationActive)
-                                .focused($settingsFocus, equals: .revoke(phone.id))
+                            .padding(10)
+                            if phone.id != model.pairedPhones.last?.id { cardDivider }
                         }
-                        .padding(10)
-                        if phone.id != model.pairedPhones.last?.id { cardDivider }
                     }
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 28)
         }
-        .padding(.top, 4)
+        .scrollIndicators(.automatic)
+        .companionSoftScrollEdge {
+            ZStack {
+                Text("Paired phones")
+                    .font(.system(size: 34, weight: .bold))
+                HStack {
+                    Button { model.settingsPage = .home } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 30, height: 30)
+                    }
+                    .companionGlassButtonStyle()
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .accessibilityLabel("Back to Settings")
+                    .help("Back to Settings")
+                    .focusable()
+                    .focusEffectDisabled(!keyboardNavigationActive)
+                    .focused($settingsFocus, equals: .pairedPhonesBack)
+                    Spacer()
+                }
+                .padding(.leading, 20)
+            }
+            .frame(height: 45)
+            .padding(.top, 43)
+            .padding(.bottom, 18)
+        }
     }
 
     private var changelogPage: some View {
@@ -646,6 +712,56 @@ struct CompanionSettings: View {
         copyFeedbackTask = nil
         copiedPasscode = false
         model.refreshPasscode()
+    }
+}
+
+private struct RenamePairedPhoneSheet: View {
+    let phone: PairedPhone
+    let onSave: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var nameFocused: Bool
+    @State private var name: String
+
+    init(phone: PairedPhone, onSave: @escaping (String) -> Void) {
+        self.phone = phone
+        self.onSave = onSave
+        _name = State(initialValue: phone.name)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename phone")
+                .font(.headline)
+            Text("Choose the name shown for this phone in Stats Companion.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField("Phone name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .focused($nameFocused)
+                .onSubmit(save)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmedName.isEmpty || trimmedName.count > 60)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear { nameFocused = true }
+    }
+
+    private func save() {
+        guard !trimmedName.isEmpty, trimmedName.count <= 60 else { return }
+        onSave(trimmedName)
+        dismiss()
     }
 }
 
@@ -807,6 +923,10 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.6", date: "November 11, 2026", changes: [
+            "Moved paired phones into a dedicated, scrollable Settings page.",
+            "Added phone renaming without requiring a new pairing, while preserving individual revocation."
+        ]),
         .init(version: "0.3.5", date: "November 11, 2026", changes: [
             "Keep the menu bar's update arrow synchronized with release checks, without reopening the app.",
             "Preserve the blue Stats icon and the circular update arrow in both light and dark appearances."

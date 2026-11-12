@@ -5,6 +5,16 @@ enum StatsHapticPreference {
     static let enabledKey = "StatsForIOS.hapticsEnabled"
 }
 
+enum PhoneNamePreference {
+    static let key = "StatsForIOS.pairingPhoneName"
+
+    @MainActor
+    static var deviceName: String {
+        let name = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "iPhone" : String(name.prefix(60))
+    }
+}
+
 struct PasscodeEntryView: View {
     let device: NearbyMacStore.Device
     @ObservedObject var store: NearbyMacStore
@@ -12,9 +22,12 @@ struct PasscodeEntryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
+    @AppStorage(PhoneNamePreference.key) private var phoneName = PhoneNamePreference.deviceName
     @State private var code = ""
     @State private var isPairing = false
     @State private var errorMessage: String?
+    @State private var editingPhoneName = false
+    @State private var proposedPhoneName = ""
 
     private let rows = [["1", "2", "3"], ["4", "5", "6"],
                         ["7", "8", "9"], ["", "0", "delete"]]
@@ -26,6 +39,21 @@ struct PasscodeEntryView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     HStack {
+                        Button {
+                            proposedPhoneName = phoneName
+                            editingPhoneName = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "iphone")
+                                Text(phoneName).lineLimit(1)
+                                Image(systemName: "pencil").font(.caption)
+                            }
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.75))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit phone name shown on Mac, currently \(phoneName)")
+                        .disabled(isPairing)
                         Spacer()
                         Button { dismiss() } label: {
                             Image(systemName: "xmark")
@@ -102,6 +130,18 @@ struct PasscodeEntryView: View {
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(32)
         .interactiveDismissDisabled(isPairing)
+        .alert("Name shown on Mac", isPresented: $editingPhoneName) {
+            TextField("Phone name", text: $proposedPhoneName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let trimmed = proposedPhoneName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, trimmed.count <= 60 { phoneName = trimmed }
+            }
+            .disabled(proposedPhoneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      || proposedPhoneName.trimmingCharacters(in: .whitespacesAndNewlines).count > 60)
+        } message: {
+            Text("iOS may share only a generic device name. Enter the name you want Stats Companion to show.")
+        }
     }
 
     private func keypad(size: CGFloat) -> some View {
@@ -166,9 +206,13 @@ struct PasscodeEntryView: View {
     }
 
     private func pair() {
+        let name = phoneName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 60 else {
+            errorMessage = "Choose a phone name between 1 and 60 characters."
+            return
+        }
         isPairing = true
-        let name = String(UIDevice.current.name.prefix(60))
-        store.pairWithPasscode(device, code: code, phoneName: name.isEmpty ? "iPhone" : name) { result in
+        store.pairWithPasscode(device, code: code, phoneName: name) { result in
             isPairing = false
             switch result {
             case .success:

@@ -9,6 +9,7 @@ import SwiftUI
 enum CompanionSettingsPage: Equatable {
     case home
     case changelog
+    case pairedPhones
 }
 enum CompanionUpdateState: Equatable {
     case idle
@@ -210,6 +211,10 @@ final class StatsCompanionModel: ObservableObject {
 
     func revokePhone(_ id: UUID) {
         server?.revokePhone(id)
+    }
+
+    func renamePhone(_ id: UUID, to name: String) {
+        server?.renamePhone(id, to: name)
     }
 
     func setOpenAtLogin(_ enabled: Bool) {

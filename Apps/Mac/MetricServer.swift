@@ -89,6 +89,13 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
         }
     }
 
+    func renamePhone(_ id: UUID, to name: String) {
+        queue.async { [weak self] in
+            self?.phones.rename(id, to: name)
+            self?.publishPhones()
+        }
+    }
+
     private func startListener(preferredPort: NWEndpoint.Port?) {
         do {
             let listener: NWListener

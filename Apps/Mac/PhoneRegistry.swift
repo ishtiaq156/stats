@@ -14,6 +14,10 @@ struct PairedPhone: Identifiable, Sendable {
 }
 
 final class PhoneRegistry {
+    private static func aliasKey(for id: UUID) -> String {
+        "StatsCompanion.phoneName.\(id.uuidString)"
+    }
+
     private struct Entry {
         var name: String
         var key: Data
@@ -49,7 +53,8 @@ final class PhoneRegistry {
             guard SecItemCopyMatching(keyQuery as CFDictionary, &keyResult) == errSecSuccess,
                   let key = keyResult as? Data,
                   key.count == 32 else { continue }
-            let name = item[kSecAttrLabel as String] as? String ?? "iPhone"
+            let name = UserDefaults.standard.string(forKey: Self.aliasKey(for: id))
+                ?? (item[kSecAttrLabel as String] as? String ?? "iPhone")
             let lastSeen = UserDefaults.standard.object(forKey: "StatsCompanion.lastSeen.\(id)") as? Date
             entries[id] = Entry(name: name, key: key, lastSeen: lastSeen, lastPersisted: lastSeen)
         }
@@ -77,6 +82,14 @@ final class PhoneRegistry {
         return id
     }
 
+    func rename(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var entry = entries[id], !trimmed.isEmpty, trimmed.count <= 60 else { return }
+        UserDefaults.standard.set(trimmed, forKey: Self.aliasKey(for: id))
+        entry.name = trimmed
+        entries[id] = entry
+    }
+
     func recordActivity(for id: UUID) {
         guard var entry = entries[id] else { return }
         let now = Date()
@@ -96,6 +109,7 @@ final class PhoneRegistry {
         ]
         SecItemDelete(query as CFDictionary)
         UserDefaults.standard.removeObject(forKey: "StatsCompanion.lastSeen.\(id)")
+        UserDefaults.standard.removeObject(forKey: Self.aliasKey(for: id))
         entries.removeValue(forKey: id)
     }
 }

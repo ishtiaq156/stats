@@ -332,8 +332,8 @@ struct PairingView: View {
     @ObservedObject var store: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
     @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
+    @AppStorage(PhoneNamePreference.key) private var phoneName = PhoneNamePreference.deviceName
     @State private var pairingDevice: NearbyMacStore.Device?
-    @State private var phoneName = "iPhone"
     @State private var manualPasscode = ""
     @State private var pairingError: String?
     @State private var isPairing = false
@@ -395,7 +395,6 @@ struct PairingView: View {
                         SecureField("Five-digit passcode", text: $manualPasscode)
                             .keyboardType(.numberPad)
                             .textContentType(.oneTimeCode)
-                        TextField("This phone's name", text: $phoneName)
                         Button {
                             isPairing = true
                             store.pairManualWithPasscode(host: manualHost, portString: manualPort,
@@ -414,12 +413,17 @@ struct PairingView: View {
                             }
                         }
                         .disabled(isPairing || manualHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                  || UInt16(manualPort) == nil || manualPasscode.count != 5)
+                                  || UInt16(manualPort) == nil || manualPasscode.count != 5
+                                  || phoneName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || phoneName.count > 60)
                     }
                 } header: { Text("Manual address") }
                 footer: { Text("If your Mac isn't discovered, enter the local address and port shown in Stats Companion.") }
 
                 Section("Preferences") {
+                    TextField("This phone's name", text: $phoneName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
                     Toggle("Haptics", isOn: $hapticsEnabled)
                 }
 

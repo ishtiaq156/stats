@@ -11,6 +11,7 @@ private final class Runner {
     private var code: String?
     private var port: UInt16?
     private var result: String?
+    private var renamedEnrollment: PairingWire.Enrollment?
     private var revokedEnrollment: PairingWire.Enrollment?
 
     init() {
@@ -24,7 +25,21 @@ private final class Runner {
             onPort: { [weak self] port in self?.port = port; self?.startPairingIfReady() },
             onDiscovery: { _, _ in },
             onPhones: { [weak self] phones in
-                guard let self, let enrollment = self.revokedEnrollment,
+                guard let self else { return }
+                if let enrollment = self.renamedEnrollment,
+                   phones.contains(where: { $0.id == enrollment.phoneID && $0.name == "Renamed test iPhone" }) {
+                    let restored = PhoneRegistry(service: self.service)
+                    guard restored.key(for: enrollment.phoneID) == enrollment.credential,
+                          restored.all().first?.name == "Renamed test iPhone" else {
+                        self.result = "Renamed phone did not survive registry reload"
+                        return
+                    }
+                    self.renamedEnrollment = nil
+                    self.revokedEnrollment = enrollment
+                    self.server.revokePhone(enrollment.phoneID)
+                    return
+                }
+                guard let enrollment = self.revokedEnrollment,
                       !phones.contains(where: { $0.id == enrollment.phoneID }) else { return }
                 self.revokedEnrollment = nil
                 self.checkRevoked(enrollment)
@@ -138,14 +153,19 @@ private final class Runner {
                     self.result = "Credential was not restored from Keychain"
                     return
                 }
-                self.revokedEnrollment = enrollment
-                self.server.revokePhone(enrollment.phoneID)
+                self.renamedEnrollment = enrollment
+                self.server.renamePhone(enrollment.phoneID, to: "Renamed test iPhone")
                 connection.cancel()
             }
         }
     }
 
     private func checkRevoked(_ enrollment: PairingWire.Enrollment) {
+        guard PhoneRegistry(service: service).key(for: enrollment.phoneID) == nil,
+              UserDefaults.standard.object(forKey: "StatsCompanion.phoneName.\(enrollment.phoneID.uuidString)") == nil else {
+            result = "Revocation did not remove credential and phone alias"
+            return
+        }
         guard let port else { result = "Missing port"; return }
         let connection = NWConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!), using: .tcp)
         fetch = connection
