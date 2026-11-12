@@ -364,22 +364,7 @@ struct StatsCompanionApp: App {
         )) {
             CompanionMenu(model: model)
         } label: {
-            HStack(spacing: 2) {
-                Image("StatsStatusMark")
-                    .resizable()
-                    .interpolation(.high)
-                    .renderingMode(.original)
-                    .frame(width: 18, height: 18)
-                if model.hasUpdateAvailable {
-                    Image("StatsUpdateAvailable")
-                        .resizable()
-                        .interpolation(.high)
-                        .renderingMode(.original)
-                        .frame(width: 15, height: 15)
-                        .accessibilityHidden(true)
-                }
-            }
-            .accessibilityLabel(model.hasUpdateAvailable ? "Stats Companion, update available" : "Stats Companion")
+            CompanionMenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
         companionSettingsScene
