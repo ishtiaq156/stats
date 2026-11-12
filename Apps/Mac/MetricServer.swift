@@ -21,6 +21,9 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
     private let queue = DispatchQueue(label: "StatsForIOS.MetricServer")
     private var listener: NWListener?
     private var advertiser: NetService?
+    private var advertisementPort: NWEndpoint.Port?
+    private var advertisementGeneration = UUID()
+    private var advertisementRetry = BonjourRetryBackoff()
     private var attemptedFallback = false
     private let phones: PhoneRegistry
     private struct PairingSession {
@@ -134,30 +137,55 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
             self?.pairingSession = nil
         }
         DispatchQueue.main.async { [weak self] in
+            self?.advertisementGeneration = UUID()
+            self?.advertisementPort = nil
+            self?.advertisementRetry.reset()
             self?.advertiser?.stop()
             self?.advertiser = nil
         }
     }
 
     private func advertise(port: NWEndpoint.Port) {
+        advertisementGeneration = UUID()
+        advertisementPort = port
+        advertisementRetry.reset()
+        publishService(on: port)
+    }
+
+    private func publishService(on port: NWEndpoint.Port) {
         advertiser?.stop()
         let service = NetService(domain: "local.", type: SecurePacket.serviceType + ".", name: "Stats Companion", port: Int32(port.rawValue))
         let computerName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         service.setTXTRecord(NetService.data(fromTXTRecord: ["name": Data(computerName.utf8)]))
         service.delegate = self
-        service.publish()
         advertiser = service
+        service.publish()
     }
 
     func netServiceDidPublish(_ sender: NetService) {
+        guard advertiser === sender else { return }
+        advertisementRetry.reset()
         NSLog("Stats Companion Bonjour published")
         DispatchQueue.main.async { [onDiscovery] in onDiscovery(true, nil) }
     }
 
     func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
-        NSLog("Stats Companion Bonjour failed: %@", String(describing: errorDict))
+        guard advertiser === sender else { return }
+        let code = errorDict["NSNetServicesErrorCode"]?.intValue
+        let codeText = code.map(String.init) ?? "unknown"
+        NSLog("Stats Companion Bonjour failed (code %@): %@", codeText, String(describing: errorDict))
         DispatchQueue.main.async { [onDiscovery] in
-            onDiscovery(false, "Local discovery is unavailable. Manual address pairing may still work.")
+            onDiscovery(false, "Local discovery unavailable (error \(codeText)). Retrying; manual pairing still works.")
+        }
+
+        let generation = advertisementGeneration
+        let failedService = ObjectIdentifier(sender)
+        let delay = advertisementRetry.afterFailure()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.advertisementGeneration == generation,
+                  let current = self.advertiser, ObjectIdentifier(current) == failedService,
+                  let port = self.advertisementPort else { return }
+            self.publishService(on: port)
         }
     }
 

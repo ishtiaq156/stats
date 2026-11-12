@@ -11,6 +11,7 @@ bridge_dir="$repo_dir/Packages/ActivityCore/Vendor/Spake2FFI.xcframework/macos-a
 
 swiftc -I "$module_dir" -I "$module_dir/include" \
   -Xcc -fmodule-map-file="$bridge_dir/Headers/module.modulemap" \
+  "$repo_dir/Apps/Mac/BonjourRetryBackoff.swift" \
   "$repo_dir/Apps/Mac/MetricServer.swift" \
   "$repo_dir/Apps/Mac/PhoneRegistry.swift" \
   "$repo_dir/Apps/Mobile/PasscodePairer.swift" \

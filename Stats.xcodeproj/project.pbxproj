@@ -17,6 +17,7 @@
 		8BFEED78DC5B739E60040132 /* NearbyMacsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1202F64F51E6D5E68C6C62EC /* NearbyMacsView.swift */; };
 		8C6642FA02304134D53E4DEF /* CompanionUpdateRelease.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B37B970C1622C95755EF5BD /* CompanionUpdateRelease.swift */; };
 		8C78A2CBD08C57BF163349BC /* WelcomeFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C1061D927BC896513FF033C /* WelcomeFlowView.swift */; };
+		92D65CACBA889493089DE05D /* BonjourRetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A84A83D1B0C00844DF73863 /* BonjourRetryBackoff.swift */; };
 		ABACA846D32DF7D264D45B78 /* PasscodePairer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B3744C0B26CF947738AC9C /* PasscodePairer.swift */; };
 		B016705E33683508716E8EA4 /* SystemSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E04B1865AC40461E74E297 /* SystemSampler.swift */; };
 		BCFE2659D654307ECC8E8CDC /* PasscodeEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79FB9D9AD51A36EB5C36D658 /* PasscodeEntryView.swift */; };
@@ -35,6 +36,7 @@
 		05E368B81354B29CC1F20C26 /* PhoneRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRegistry.swift; sourceTree = "<group>"; };
 		0C1061D927BC896513FF033C /* WelcomeFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeFlowView.swift; sourceTree = "<group>"; };
 		1202F64F51E6D5E68C6C62EC /* NearbyMacsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyMacsView.swift; sourceTree = "<group>"; };
+		1A84A83D1B0C00844DF73863 /* BonjourRetryBackoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourRetryBackoff.swift; sourceTree = "<group>"; };
 		25B3744C0B26CF947738AC9C /* PasscodePairer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasscodePairer.swift; sourceTree = "<group>"; };
 		2B7D72D933008F658AC73775 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4B37B970C1622C95755EF5BD /* CompanionUpdateRelease.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionUpdateRelease.swift; sourceTree = "<group>"; };
@@ -126,6 +128,7 @@
 			isa = PBXGroup;
 			children = (
 				614A5AEDD0187672696A2703 /* Assets.xcassets */,
+				1A84A83D1B0C00844DF73863 /* BonjourRetryBackoff.swift */,
 				A40DFC8AB235E0212E4F1A15 /* CompanionMenu.swift */,
 				F7494C14876FB82B53ADC99A /* CompanionSettings.swift */,
 				56BE6EE9486BF023522A1F3E /* CompanionTabNavigation.swift */,
@@ -257,6 +260,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				92D65CACBA889493089DE05D /* BonjourRetryBackoff.swift in Sources */,
 				F35CD5FFEA066133B15087FC /* CompanionMenu.swift in Sources */,
 				127050C6354A8951F0F3AD7C /* CompanionSettings.swift in Sources */,
 				F28F03F5E684D86C23BADFFB /* CompanionTabNavigation.swift in Sources */,
@@ -318,7 +322,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -327,7 +331,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;
@@ -401,7 +405,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -410,7 +414,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.3.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 6.0;

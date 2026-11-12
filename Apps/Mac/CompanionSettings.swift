@@ -807,6 +807,10 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.4", date: "November 11, 2026", changes: [
+            "Retry local Bonjour discovery automatically after a temporary publishing failure or first-run permission change.",
+            "Show the Bonjour error code when discovery fails, while keeping manual address pairing available."
+        ]),
         .init(version: "0.3.3", date: "November 11, 2026", changes: [
             "Show a circular up-arrow beside the Stats menu bar icon when a newer Mac version is available.",
             "Check for new releases quietly at launch and every six hours, including pre-releases.",
