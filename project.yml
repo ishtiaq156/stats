@@ -50,8 +50,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ishtiaqsyed.StatsCompanion
-        MARKETING_VERSION: '0.3.6'
-        CURRENT_PROJECT_VERSION: 9
+        MARKETING_VERSION: '0.3.7'
+        CURRENT_PROJECT_VERSION: 10
         INFOPLIST_KEY_CFBundleDisplayName: Stats Companion
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES

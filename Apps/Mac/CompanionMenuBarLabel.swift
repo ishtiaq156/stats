@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// A scene's body does not observe changes to the model merely because it
-/// owns the model as a StateObject. The menu bar label must subscribe itself,
-/// or the update row changes while the status bar retains its original icon.
+/// owns the model as a StateObject. The menu bar label must subscribe itself.
+/// Also reserve the update icon's space up front: the native status-bar item
+/// may cache its first intrinsic width and clip an icon added later.
 @MainActor
 struct CompanionMenuBarLabel: View {
     @ObservedObject var model: StatsCompanionModel
@@ -21,9 +22,13 @@ struct CompanionMenuBarLabel: View {
                     .renderingMode(.original)
                     .frame(width: 15, height: 15)
                     .accessibilityHidden(true)
+            } else {
+                Color.clear
+                    .frame(width: 15, height: 15)
+                    .accessibilityHidden(true)
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .frame(width: 35, height: 18)
         .accessibilityLabel(model.hasUpdateAvailable ? "Stats Companion, update available" : "Stats Companion")
     }
 }

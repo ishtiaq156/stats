@@ -49,9 +49,12 @@ struct MenuBarLabelTests {
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         let restored = measuredWidth()
 
-        precondition(abs(normal - 18) < 1, "Base icon width: \(normal)")
-        precondition(abs(update - 35) < 1, "Update icon width: \(update)")
-        precondition(abs(restored - 18) < 1, "Reset icon width: \(restored)")
-        print("Menu bar label: update state resized icon \(normal) → \(update) → \(restored) points")
+        // MenuBarExtra can retain the initial NSStatusItem width even when
+        // the SwiftUI label's intrinsic width grows. Keep the icon slot fixed
+        // in all states so a newly available update cannot be clipped.
+        precondition(abs(normal - 35) < 1, "Reserved status icon width: \(normal)")
+        precondition(abs(update - normal) < 1, "Update changed status item width: \(update)")
+        precondition(abs(restored - normal) < 1, "Reset changed status item width: \(restored)")
+        print("Menu bar label: stable width \(normal) → \(update) → \(restored) points")
     }
 }
