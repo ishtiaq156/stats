@@ -216,7 +216,7 @@ struct CompanionMenu: View {
                           text: CompanionConnectionPresentation.noDevices.text, muted: true)
             } else {
                 ForEach(active) { phone in
-                    statusRow("iphone.circle.fill", color: .green, text: phone.name)
+                    statusRow("iphone.circle.fill", color: .green, text: phone.name, centerIcon: true)
                 }
             }
         }
@@ -225,8 +225,9 @@ struct CompanionMenu: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func statusRow(_ symbol: String, color: Color, text: String, muted: Bool = false) -> some View {
-        HStack(alignment: muted ? .center : .top, spacing: 8) {
+    private func statusRow(_ symbol: String, color: Color, text: String,
+                           muted: Bool = false, centerIcon: Bool = false) -> some View {
+        HStack(alignment: muted || centerIcon ? .center : .top, spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(color)
