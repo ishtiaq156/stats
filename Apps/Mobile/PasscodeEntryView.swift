@@ -1,12 +1,17 @@
 import SwiftUI
 import UIKit
 
+enum StatsHapticPreference {
+    static let enabledKey = "StatsForIOS.hapticsEnabled"
+}
+
 struct PasscodeEntryView: View {
     let device: NearbyMacStore.Device
     @ObservedObject var store: NearbyMacStore
     let onPaired: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
     @State private var code = ""
     @State private var isPairing = false
     @State private var errorMessage: String?
@@ -132,6 +137,7 @@ struct PasscodeEntryView: View {
 
     private func enterDigit(_ digit: String) {
         guard !isPairing, code.count < 5 else { return }
+        if hapticsEnabled { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         errorMessage = nil
         code += digit
         if code.count == 5 { pair() }
@@ -139,6 +145,7 @@ struct PasscodeEntryView: View {
 
     private func deleteDigit() {
         guard !isPairing, !code.isEmpty else { return }
+        if hapticsEnabled { UISelectionFeedbackGenerator().selectionChanged() }
         code.removeLast()
         errorMessage = nil
     }
@@ -149,8 +156,10 @@ struct PasscodeEntryView: View {
               pasted.utf8.count == 5,
               pasted.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else {
             errorMessage = "Copy a five-digit code from Stats Companion."
+            if hapticsEnabled { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
             return
         }
+        if hapticsEnabled { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         code = pasted
         errorMessage = nil
         pair()
@@ -163,12 +172,13 @@ struct PasscodeEntryView: View {
             isPairing = false
             switch result {
             case .success:
+                if hapticsEnabled { UINotificationFeedbackGenerator().notificationOccurred(.success) }
                 dismiss()
                 onPaired()
             case .failure(let error):
                 code = ""
                 errorMessage = error.localizedDescription
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                if hapticsEnabled { UINotificationFeedbackGenerator().notificationOccurred(.error) }
             }
         }
     }

@@ -129,6 +129,7 @@ private struct OverviewView: View {
 private struct DashboardSettingsView: View {
     @ObservedObject var nearby: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
     @State private var showAbout = false
     @State private var showForgetConfirmation = false
 
@@ -144,6 +145,9 @@ private struct DashboardSettingsView: View {
                             Text("\(seconds) seconds").tag(seconds)
                         }
                     }
+                }
+                Section("Interaction") {
+                    Toggle("Haptics", isOn: $hapticsEnabled)
                 }
                 Section {
                     Button("About This Mac") { showAbout = true }
@@ -327,6 +331,7 @@ private struct MacWindowLight: View {
 struct PairingView: View {
     @ObservedObject var store: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
     @State private var pairingDevice: NearbyMacStore.Device?
     @State private var phoneName = "iPhone"
     @State private var manualPasscode = ""
@@ -413,6 +418,10 @@ struct PairingView: View {
                     }
                 } header: { Text("Manual address") }
                 footer: { Text("If your Mac isn't discovered, enter the local address and port shown in Stats Companion.") }
+
+                Section("Preferences") {
+                    Toggle("Haptics", isOn: $hapticsEnabled)
+                }
 
                 if store.selectedName != nil {
                     Section {
