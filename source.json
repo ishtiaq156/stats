@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.5",
+          "buildVersion": "8",
+          "date": "2026-11-13T05:28:55Z",
+          "localizedDescription": "Stats for iPhone 0.3.5 refreshes Mac passcode pairing with tactile keypad feedback and a clearer, glass-style entry screen.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.11/Stats-v0.3.5-iOS.ipa",
+          "size": 2630472,
+          "sha256": "a42d1bacd1f118436defebeab0404d9050c0a59a0755fd60f71cc4d15d73577c",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.4",
           "buildVersion": "7",
           "date": "2026-11-13T03:24:17Z",
