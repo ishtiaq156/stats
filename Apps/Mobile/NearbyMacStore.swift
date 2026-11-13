@@ -401,11 +401,6 @@ final class NearbyMacStore: ObservableObject {
         sessionActive = false
     }
 
-    func hasSavedPairing(_ device: Device) -> Bool {
-        guard let stored = PairingStore.load(for: device.name) else { return false }
-        return PairingStore.decode(stored) != nil
-    }
-
     func displayName(for device: Device) -> String {
         if device.name == selectedName { return selectedDisplayName ?? device.displayName }
         return device.displayName

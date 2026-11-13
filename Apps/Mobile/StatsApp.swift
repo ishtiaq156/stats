@@ -371,7 +371,6 @@ struct PairingView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
     @AppStorage(PhoneNamePreference.key) private var phoneName = PhoneNamePreference.deviceName
-    @State private var pairingDevice: NearbyMacStore.Device?
     @State private var manualPasscode = ""
     @State private var pairingError: String?
     @State private var isPairing = false
@@ -384,46 +383,6 @@ struct PairingView: View {
         NavigationStack {
             Form {
                 Section {
-                    if store.devices.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(store.discoveryError != nil ? "Nearby search unavailable" : "Searching for Macs",
-                                  systemImage: store.discoveryError != nil ? "wifi.exclamationmark" : "magnifyingglass")
-                                .font(.headline)
-                            Text(store.discoveryError != nil
-                                 ? "You can still connect using the Mac's local IP address and port below."
-                                 : "Open Stats Companion on your Mac. Both devices need to be on the same network.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 10)
-                    } else {
-                        ForEach(store.devices) { device in
-                            HStack {
-                                Button {
-                                    if store.select(device) { dismiss() }
-                                    else {
-                                        pairingDevice = device
-                                    }
-                                } label: {
-                                    Label(store.displayName(for: device), systemImage: "desktopcomputer")
-                                }
-                                .disabled(isPairing)
-                                Spacer()
-                                if store.hasSavedPairing(device) {
-                                    Button("Pair again") {
-                                        pairingDevice = device
-                                    }
-                                    .font(.caption)
-                                    .disabled(isPairing)
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                } header: { Text("Nearby Macs") }
-                footer: { Text("Enter the five-digit passcode displayed at the top of the Stats Companion menu on your Mac.") }
-
-                Section {
                     DisclosureGroup("Connect using IP address", isExpanded: $showManualAddress) {
                         TextField("Mac IP address", text: $manualHost)
                             .textInputAutocapitalization(.never)
@@ -433,6 +392,12 @@ struct PairingView: View {
                         SecureField("Five-digit passcode", text: $manualPasscode)
                             .keyboardType(.numberPad)
                             .textContentType(.oneTimeCode)
+                        LabeledContent("Name shown on Mac") {
+                            TextField("Choose a name", text: $phoneName)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                        }
                         Button {
                             isPairing = true
                             store.pairManualWithPasscode(host: manualHost, portString: manualPort,
@@ -459,9 +424,6 @@ struct PairingView: View {
                 footer: { Text("If your Mac isn't discovered, enter the local address and port shown in Stats Companion.") }
 
                 Section("Preferences") {
-                    TextField("This phone's name", text: $phoneName)
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled()
                     Toggle("Haptics", isOn: $hapticsEnabled)
                 }
 
@@ -472,13 +434,16 @@ struct PairingView: View {
                         }
                     }
                 }
+
+                Section {
+                    StatsSettingsFooter()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
             }
             .navigationTitle("Mac connections")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .sheet(item: $pairingDevice) { device in
-                PasscodeEntryView(device: device, store: store) { dismiss() }
-            }
             .alert("Pairing failed", isPresented: Binding(
                 get: { pairingError != nil },
                 set: { if !$0 { pairingError = nil } }
@@ -495,7 +460,6 @@ struct PairingView: View {
                 Text("You will need to pair again to see this Mac's stats.")
             }
         }
-        .onAppear { store.startDiscovery() }
     }
 }
 
