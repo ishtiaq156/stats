@@ -27,34 +27,45 @@ enum CompanionUpdateRelease {
     static func newest(in data: Data, newerThan current: String) throws -> CompanionAvailableRelease? {
         let releases = try JSONDecoder().decode([Release].self, from: data)
         guard let currentParts = versionParts(current) else { return nil }
-        return releases.compactMap { release -> (parts: [Int], result: CompanionAvailableRelease)? in
+        return releases.flatMap { release -> [(parts: [Int], result: CompanionAvailableRelease)] in
             guard !release.draft,
                   release.html_url.scheme == "https",
                   release.html_url.host == "github.com",
-                  let parts = versionParts(release.tag_name),
-                  currentParts.lexicographicallyPrecedes(parts) else { return nil }
+                  release.tag_name.first == "v",
+                  versionParts(release.tag_name) != nil,
+                  release.html_url.path == "/ishtiaq156/stats/releases/tag/\(release.tag_name)"
+            else { return [] }
 
-            let version = release.tag_name.first == "v" || release.tag_name.first == "V"
-                ? String(release.tag_name.dropFirst()) : release.tag_name
-            guard release.tag_name == "v\(version)",
-                  release.html_url.path == "/ishtiaq156/stats/releases/tag/v\(version)" else { return nil }
-            let filename = "StatsCompanion-v\(version)-macOS-universal"
-            // Prefer ZIP when both artifacts are published: it can be staged
-            // without asking macOS to mount a disk image.
-            let asset = release.assets.first { $0.name == filename + ".zip" }
-                ?? release.assets.first { $0.name == filename + ".dmg" }
-            guard let asset, let downloadURL = asset.browser_download_url,
-                  downloadURL.scheme == "https", downloadURL.host == "github.com",
-                  downloadURL.path == "/ishtiaq156/stats/releases/download/v\(version)/\(asset.name)",
-                  let digest = asset.digest, digest.hasPrefix("sha256:") else { return nil }
-            let sha256 = String(digest.dropFirst("sha256:".count)).lowercased()
-            guard sha256.utf8.count == 64,
-                  sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
-            return (parts, CompanionAvailableRelease(
-                version: version, url: release.html_url, downloadURL: downloadURL,
-                assetName: asset.name, sha256: sha256
-            ))
-        }.max { $0.parts.lexicographicallyPrecedes($1.parts) }?.result
+            return release.assets.compactMap { asset -> (parts: [Int], result: CompanionAvailableRelease)? in
+                let prefix = "StatsCompanion-v"
+                let suffix = "-macOS-universal"
+                guard asset.name.hasPrefix(prefix) else { return nil }
+                let extensionName: String
+                if asset.name.hasSuffix(".zip") { extensionName = ".zip" }
+                else if asset.name.hasSuffix(".dmg") { extensionName = ".dmg" }
+                else { return nil }
+                let stem = String(asset.name.dropLast(extensionName.count))
+                guard stem.hasSuffix(suffix) else { return nil }
+                let version = String(stem.dropFirst(prefix.count).dropLast(suffix.count))
+                guard let parts = versionParts(version),
+                      currentParts.lexicographicallyPrecedes(parts),
+                      let downloadURL = asset.browser_download_url,
+                      downloadURL.scheme == "https", downloadURL.host == "github.com",
+                      downloadURL.path == "/ishtiaq156/stats/releases/download/\(release.tag_name)/\(asset.name)",
+                      let digest = asset.digest, digest.hasPrefix("sha256:") else { return nil }
+                let sha256 = String(digest.dropFirst("sha256:".count)).lowercased()
+                guard sha256.utf8.count == 64,
+                      sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
+                return (parts, CompanionAvailableRelease(
+                    version: version, url: release.html_url, downloadURL: downloadURL,
+                    assetName: asset.name, sha256: sha256
+                ))
+            }
+        }.max {
+            if $0.parts != $1.parts { return $0.parts.lexicographicallyPrecedes($1.parts) }
+            // Prefer a valid ZIP over a DMG for the same Mac version.
+            return $0.result.assetName.hasSuffix(".dmg") && $1.result.assetName.hasSuffix(".zip")
+        }?.result
     }
 
     private static func versionParts(_ raw: String) -> [Int]? {

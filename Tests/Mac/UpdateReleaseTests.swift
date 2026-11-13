@@ -5,12 +5,13 @@ struct UpdateReleaseTests {
     private static func release(
         _ version: String,
         draft: Bool = false,
-        asset: String = "StatsCompanion-v0.3.3-macOS-universal.dmg",
+        asset: String? = nil,
         url: String? = nil,
         assetURL: String? = nil,
         digest: String? = "sha256:" + String(repeating: "a", count: 64)
     ) -> [String: Any] {
-        [
+        let asset = asset ?? "StatsCompanion-\(version)-macOS-universal.dmg"
+        return [
             "tag_name": version,
             "html_url": url ?? "https://github.com/ishtiaq156/stats/releases/tag/\(version)",
             "draft": draft,
@@ -37,6 +38,15 @@ struct UpdateReleaseTests {
         try expect([], version: nil)
         try expect([release("v0.3.2"), release("v0.3.1")], version: nil)
         try expect([release("v0.3.3")], version: "0.3.3")
+        let combinedRelease = release(
+            "v0.3.14",
+            asset: "StatsCompanion-v0.3.10-macOS-universal.zip"
+        )
+        try expect([combinedRelease], from: "0.3.9", version: "0.3.10")
+        let combinedMatch = try selected([combinedRelease], from: "0.3.9")
+        precondition(combinedMatch?.downloadURL.path ==
+                     "/ishtiaq156/stats/releases/download/v0.3.14/StatsCompanion-v0.3.10-macOS-universal.zip")
+        try expect([combinedRelease], from: "0.3.10", version: nil)
         try expect([release("v0.4.0", asset: "StatsCompanion-v0.4.0-macOS-universal.dmg"),
                     release("v0.9.0", asset: "StatsCompanion-v0.9.0-macOS-universal.dmg"),
                     release("v0.10.0", asset: "StatsCompanion-v0.10.0-macOS-universal.dmg")], version: "0.10.0")
@@ -74,7 +84,7 @@ struct UpdateReleaseTests {
         print("Update availability and trusted asset selection passed")
         if CommandLine.arguments.count > 1 {
             let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
-            for installedVersion in ["0.3.1", "0.3.2"] {
+            for installedVersion in ["0.3.1", "0.3.2", "0.3.9"] {
                 let match = try CompanionUpdateRelease.newest(in: data, newerThan: installedVersion)
                 print("Live GitHub response for \(installedVersion): \(match?.version ?? "no update")")
             }
