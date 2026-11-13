@@ -1,0 +1,37 @@
+{
+  "name": "Stats",
+  "subtitle": "Live Mac metrics on your iPhone",
+  "description": "Install Stats for iPhone and connect to Stats Companion on your Mac.",
+  "website": "https://github.com/ishtiaq156/stats",
+  "apps": [
+    {
+      "name": "Stats",
+      "bundleIdentifier": "com.ishtiaqsyed.StatsForIOS",
+      "developerName": "Ishtiaq Ul Haq Syed",
+      "subtitle": "Your Mac's activity, on your iPhone",
+      "localizedDescription": "View live CPU, memory, storage, and network activity from your Mac. Pair securely over your local network using Stats Companion.",
+      "iconURL": "https://raw.githubusercontent.com/ishtiaq156/stats/main/Apps/Mobile/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "0.3.4",
+          "buildVersion": "7",
+          "date": "2026-11-13T03:24:17Z",
+          "localizedDescription": "Stats for iPhone 0.3.4 provides a validated unsigned device IPA for direct sideloading with AltStore or SideStore and guest import into LiveContainer.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.10/Stats-v0.3.4-iOS.ipa",
+          "size": 2610561,
+          "sha256": "f02e1f706710964b92dc6e32f206c69dad42b82a0408d70ce5d1e1f58666dc34",
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSBluetoothAlwaysUsageDescription": "Allow nearby device support. Stats currently connects to your Mac over your local network.",
+          "NSLocalNetworkUsageDescription": "Find Stats Companion on your local network and connect to your Mac."
+        }
+      }
+    }
+  ],
+  "news": []
+}

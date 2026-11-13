@@ -1,0 +1,44 @@
+name: Update sideload source
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to sync
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Sync published iPhone IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --json publishedAt,body,assets > "$RUNNER_TEMP/release.json"
+          asset_name=$(jq -r '[.assets[].name | select(test("^Stats-v[0-9]+\\.[0-9]+\\.[0-9]+-iOS\\.ipa$"))] | if length == 1 then .[0] else empty end' "$RUNNER_TEMP/release.json")
+          if [ -z "$asset_name" ]; then
+            echo 'No single Stats iPhone IPA in this release; source unchanged.'
+            exit 0
+          fi
+          gh release download "$RELEASE_TAG" --pattern "$asset_name" --dir "$RUNNER_TEMP"
+          python3 scripts/update-altstore-source.py --release "$RUNNER_TEMP/release.json" --ipa "$RUNNER_TEMP/$asset_name" --tag "$RELEASE_TAG"
+          if git diff --quiet -- source.json; then
+            echo 'Source already current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add source.json
+          git commit -m "chore(source): sync iPhone IPA from $RELEASE_TAG"
+          git push origin HEAD:main

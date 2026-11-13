@@ -12,6 +12,9 @@ Stats-vA.B.C-iOS.ipa to that release. Verify the IPA version, iPhoneOS platform,
 arm64 executable, ZIP integrity, and SHA-256 digest before publishing. Direct
 AltStore/SideStore installs and LiveContainer guest imports use the same IPA;
 LiveContainer host Bonjour restrictions are covered in docs/LIVECONTAINER-BONJOUR.md.
+After publishing a mobile release, verify `.github/workflows/update-altstore-source.yml`
+updated `source.json` with the new version and download URL. Mac-only releases
+leave the feed unchanged. If the workflow fails, run it manually with the tag.
 Once development changes pass their relevant builds/tests, commit and push
 the reviewed source to origin/main. User policy: every version bump must also
 finish with a published GitHub release and pushed version tag containing the

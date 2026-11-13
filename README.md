@@ -29,6 +29,8 @@ The Mac release also includes a signed ZIP archive. Companion prefers this archi
 
 Get both apps from the [GitHub Releases](https://github.com/ishtiaq156/stats/releases) page. They share a repository but have independent version numbers.
 
+For automatic iPhone app updates in AltStore Classic or SideStore, add the [Stats source JSON](https://raw.githubusercontent.com/ishtiaq156/stats/main/source.json) as an app source. Its latest version points to the published unsigned IPA; each mobile release updates the feed after publication.
+
 | App | Current supported platform | Download |
 | --- | --- | --- |
 | **Stats Companion** | macOS 14+, Apple Silicon and Intel | Universal `.dmg` |
