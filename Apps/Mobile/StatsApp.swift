@@ -159,6 +159,11 @@ private struct DashboardSettingsView: View {
                         }
                     }
                 }
+                Section {
+                    StatsSettingsFooter()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
             }
             .navigationTitle("Settings")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
@@ -174,6 +179,39 @@ private struct DashboardSettingsView: View {
                 Text("This iPhone will forget \(nearby.selectedDisplayName ?? "this Mac") and its saved pairing. You'll need a new passcode to connect again.")
             }
         }
+    }
+}
+
+private struct StatsSettingsFooter: View {
+    private let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Stats"
+    private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    private let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Image("StatsSettingsIcon")
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .accessibilityHidden(true)
+
+            Text(name)
+                .font(.headline)
+                .padding(.top, 14)
+            Text("Version \(version) (\(build))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+            Text("© 2026 Ishtiaq Ul Haq Syed\nAll rights reserved")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 22)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 32)
+        .padding(.bottom, 28)
     }
 }
 
