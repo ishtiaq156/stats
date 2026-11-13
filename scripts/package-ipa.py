@@ -21,7 +21,9 @@ def pack(app: Path, destination: Path) -> None:
     with plist_path.open("rb") as source:
         info = plistlib.load(source)
     executable = info.get("CFBundleExecutable")
-    if info.get("CFBundlePackageType") != "APPL" or not executable or not (app / executable).is_file():
+    if (info.get("CFBundlePackageType") != "APPL" or
+            "iPhoneOS" not in info.get("CFBundleSupportedPlatforms", []) or
+            not executable or not (app / executable).is_file()):
         raise ValueError("The .app bundle has no valid iPhone executable")
 
     destination.parent.mkdir(parents=True, exist_ok=True)

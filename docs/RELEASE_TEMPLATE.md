@@ -7,6 +7,11 @@ app needs a version bump. Increase MARKETING_VERSION and CURRENT_PROJECT_VERSION
 for every changed app in project.yml, regenerate Stats.xcodeproj, and add a
 new dated CompanionRelease.notes entry for a Mac release. Include mobile changes
 in release notes, too. Keep released versions and binaries immutable.
+For every mobile release, run scripts/build-ios-ipa.sh and attach its validated
+Stats-vA.B.C-iOS.ipa to that release. Verify the IPA version, iPhoneOS platform,
+arm64 executable, ZIP integrity, and SHA-256 digest before publishing. Direct
+AltStore/SideStore installs and LiveContainer guest imports use the same IPA;
+LiveContainer host Bonjour restrictions are covered in docs/LIVECONTAINER-BONJOUR.md.
 Once development changes pass their relevant builds/tests, commit and push
 the reviewed source to origin/main. User policy: every version bump must also
 finish with a published GitHub release and pushed version tag containing the

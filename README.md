@@ -72,6 +72,8 @@ scripts/test-pairing-smoke.sh
 
 For installation on a physical device, select your own **Personal Team** in Xcode. Developer-specific signing overrides belong in the gitignored `Config/iOSSigning.local.xcconfig` and `Config/MacSigning.local.xcconfig`; do not commit personal signing details. Retaining a consistent Mac signing identity helps preserve Keychain access to pairing credentials across builds.
 
+For an unsigned device IPA to sign with AltStore, SideStore, or import as a LiveContainer guest, run `scripts/build-ios-ipa.sh`. It builds for iPhoneOS arm64, validates the archive, and writes `dist/Stats-vX.Y.Z-iOS.ipa` without replacing an existing release artifact. Signing and installation depend on the sideloading app and device setup. LiveContainer signs guests using its host setup; [Bonjour discovery inside LiveContainer](docs/LIVECONTAINER-BONJOUR.md) explains the host allowlist and manual IP fallback.
+
 ## Project structure
 
 | Location | Purpose |
