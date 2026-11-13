@@ -953,6 +953,7 @@ private final class DiskSensorReader: @unchecked Sendable {
         for (path, url) in paths.sorted(by: { $0.key == "/" || ($1.key != "/" && $0.key < $1.key) }) {
             let disk = session.flatMap { DADiskCreateFromVolumePath(kCFAllocatorDefault, $0, url as CFURL) }
             let description = disk.flatMap { DADiskCopyDescription($0) as? [String: Any] } ?? [:]
+            let removable = description[kDADiskDescriptionMediaRemovableKey as String] as? Bool
             let bsdName = disk.flatMap { DADiskGetBSDName($0).map { String(cString: $0) } }
             let fs = fileSystem(path)
             let resources = try? url.resourceValues(forKeys: Set(keys + [
@@ -991,6 +992,7 @@ private final class DiskSensorReader: @unchecked Sendable {
             volumes.append(DiskVolume(
                 id: id, name: name, mountPath: path, bsdName: bsdName,
                 fileSystem: fileSystemName, connectionType: connection,
+                isRemovable: removable,
                 totalBytes: total, freeBytes: free,
                 readBytesPerSecond: activity?.readRate,
                 writeBytesPerSecond: activity?.writeRate,

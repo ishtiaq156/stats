@@ -42,6 +42,16 @@ final class DiskDetailsTests: XCTestCase {
         XCTAssertEqual(snapshot.version, MetricSnapshot.protocolVersion)
     }
 
+    func testRemovableDiskClassificationDecodesAcrossCompanionVersions() throws {
+        let current = DiskVolume(id: "image", name: "Installer", mountPath: "/Volumes/Installer",
+                                 isRemovable: true)
+        let encoded = try JSONEncoder().encode(current)
+        XCTAssertEqual(try JSONDecoder().decode(DiskVolume.self, from: encoded).isRemovable, true)
+
+        let older = Data(#"{"id":"image","name":"Installer","mountPath":"/Volumes/Installer"}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(DiskVolume.self, from: older).isRemovable)
+    }
+
     func testHistoricalSnapshotRetainsBoundedRatesAndRemovesMetadata() {
         let longName = String(repeating: "Long Volume Name ", count: 100)
         let volumes = (0..<9).map { volume($0, name: longName) }

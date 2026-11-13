@@ -203,6 +203,8 @@ public struct DiskVolume: Codable, Sendable, Equatable, Identifiable {
     public let bsdName: String?
     public let fileSystem: String?
     public let connectionType: String?
+    /// Disk Arbitration classification; nil for older companions.
+    public let isRemovable: Bool?
     public let totalBytes: UInt64?
     public let freeBytes: UInt64?
     /// Physical block-device activity; APFS volumes sharing a device may share rates.
@@ -214,7 +216,8 @@ public struct DiskVolume: Codable, Sendable, Equatable, Identifiable {
 
     public init(id: String, name: String, mountPath: String,
                 bsdName: String? = nil, fileSystem: String? = nil,
-                connectionType: String? = nil, totalBytes: UInt64? = nil,
+                connectionType: String? = nil, isRemovable: Bool? = nil,
+                totalBytes: UInt64? = nil,
                 freeBytes: UInt64? = nil, readBytesPerSecond: Double? = nil,
                 writeBytesPerSecond: Double? = nil, totalReadBytes: UInt64? = nil,
                 totalWrittenBytes: UInt64? = nil, smart: DiskSMART? = nil) {
@@ -224,6 +227,7 @@ public struct DiskVolume: Codable, Sendable, Equatable, Identifiable {
         self.bsdName = bsdName
         self.fileSystem = fileSystem
         self.connectionType = connectionType
+        self.isRemovable = isRemovable
         self.totalBytes = totalBytes
         self.freeBytes = freeBytes
         self.readBytesPerSecond = readBytesPerSecond

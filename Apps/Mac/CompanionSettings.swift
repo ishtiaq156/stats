@@ -963,6 +963,9 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.10", date: "November 13, 2026", changes: [
+            "Let iPhone Disk settings show or hide removable volumes, including mounted disk images."
+        ]),
         .init(version: "0.3.9", date: "November 11, 2026", changes: [
             "Center connected-phone icons vertically with their names in the menu bar, matching the Settings screen."
         ]),

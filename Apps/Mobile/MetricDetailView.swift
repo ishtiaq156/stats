@@ -1206,7 +1206,9 @@ private struct DiskDetailView: View {
     @ObservedObject var store: NearbyMacStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("Stats.showRemovableDisks") private var showRemovableDisks = false
     @State private var capturedHistory: [String: [DiskIOPoint]] = [:]
+    @State private var showingSettings = false
 
     private let readColor = Color(red: 0.06, green: 0.56, blue: 0.98)
     private let writeColor = Color(red: 0.97, green: 0.31, blue: 0.36)
@@ -1214,7 +1216,9 @@ private struct DiskDetailView: View {
     private var panelColor: Color {
         colorScheme == .dark ? Color(white: 0.25) : Color(uiColor: .secondarySystemGroupedBackground)
     }
-    private var volumes: [DiskVolume] { store.snapshot?.diskDetails?.volumes ?? [] }
+    private var volumes: [DiskVolume] {
+        (store.snapshot?.diskDetails?.volumes ?? []).filter { showRemovableDisks || $0.isRemovable != true }
+    }
 
     var body: some View {
         ScrollView {
@@ -1272,6 +1276,35 @@ private struct DiskDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Disk")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            Button {
+                showingSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Disk settings")
+        }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                Form {
+                    Section {
+                        Toggle("Show removable disks", isOn: $showRemovableDisks)
+                    } header: {
+                        Text("Volumes")
+                    } footer: {
+                        Text("Includes mounted disk images and removable drives.")
+                    }
+                }
+                .navigationTitle("Disk Settings")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingSettings = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
         .onAppear { capture(store.snapshot) }
         .onChange(of: store.snapshot) { _, snapshot in capture(snapshot) }
         .onChange(of: store.selectedName) { _, _ in capturedHistory.removeAll() }
