@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.7",
+          "buildVersion": "10",
+          "date": "2026-11-13T15:00:48Z",
+          "localizedDescription": "Stats for iPhone 0.3.7 streamlines Mac connections and brings the app identity footer to its settings screen.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.13/Stats-v0.3.7-iOS.ipa",
+          "size": 2654756,
+          "sha256": "ea902408d1e27aaa494598e33e11df6f9699867a5e1f4c1b98e022d232d8d0fd",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.6",
           "buildVersion": "9",
           "date": "2026-11-13T05:37:32Z",
