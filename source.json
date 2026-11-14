@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.11",
+          "buildVersion": "14",
+          "date": "2026-11-14T05:39:14Z",
+          "localizedDescription": "Stats iPhone 0.3.11 adds Disk screen customization.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.18/Stats-v0.3.11-iOS.ipa",
+          "size": 2749674,
+          "sha256": "c0edda819b1aa81ce3f35336b4f0cee58998e48325712bbd4032786f5c1a66db",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.10",
           "buildVersion": "13",
           "date": "2026-11-14T04:05:59Z",
