@@ -12,7 +12,6 @@ private final class Runner {
     private var port: UInt16?
     private var result: String?
     private var renamedEnrollment: PairingWire.Enrollment?
-    private var revokedEnrollment: PairingWire.Enrollment?
     private var appliedDiskSettings: DiskSamplingSettings?
 
     init() {
@@ -37,14 +36,9 @@ private final class Runner {
                         return
                     }
                     self.renamedEnrollment = nil
-                    self.revokedEnrollment = enrollment
-                    self.server.revokePhone(enrollment.phoneID)
+                    self.sendRemoteRevocation(enrollment)
                     return
                 }
-                guard let enrollment = self.revokedEnrollment,
-                      !phones.contains(where: { $0.id == enrollment.phoneID }) else { return }
-                self.revokedEnrollment = nil
-                self.checkRevoked(enrollment)
             },
             onPairingEnded: { _ in },
             phones: PhoneRegistry(service: service)
@@ -209,6 +203,52 @@ private final class Runner {
                         }
                     })
                 case .failed(let error): self.result = "Disk settings connection failed: \(error)"
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
+    }
+
+    private func sendRemoteRevocation(_ enrollment: PairingWire.Enrollment) {
+        guard let port,
+              let request = try? PairingWire.authenticatedRequest(
+                "pairing.revoke.v1", phoneID: enrollment.phoneID, key: enrollment.credential
+              ) else { result = "Could not make remote revocation request"; return }
+        let connection = NWConnection(to: .hostPort(host: "127.0.0.1",
+            port: NWEndpoint.Port(rawValue: port)!), using: .tcp)
+        fetch = connection
+        connection.stateUpdateHandler = { [weak self] state in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
+                        MainActor.assumeIsolated {
+                            guard error == nil else { self.result = "Remote revocation send failed"; return }
+                            connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, _ in
+                                MainActor.assumeIsolated {
+                                    guard let header, let length = SecurePacket.length(header) else {
+                                        self.result = "Missing remote revocation response"
+                                        return
+                                    }
+                                    connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, _ in
+                                        MainActor.assumeIsolated {
+                                            guard let body,
+                                                  let opened = try? SecurePacket.open(body, using: enrollment.credential),
+                                                  String(data: opened, encoding: .utf8) == "ok" else {
+                                                self.result = "Invalid remote revocation response"
+                                                return
+                                            }
+                                            connection.cancel()
+                                            self.checkRevoked(enrollment)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    })
+                case .failed(let error): self.result = "Remote revocation connection failed: \(error)"
                 default: break
                 }
             }

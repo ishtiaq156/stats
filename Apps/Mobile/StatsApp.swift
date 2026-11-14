@@ -139,7 +139,6 @@ private struct DashboardSettingsView: View {
     @AppStorage(DiskDisplayPreference.showSpeedKey) private var showDiskSpeed = false
     @AppStorage(DiskDisplayPreference.showTextKey) private var showDiskText = false
     @State private var showAbout = false
-    @State private var showForgetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -154,11 +153,11 @@ private struct DashboardSettingsView: View {
                 Section {
                     Button("About This Mac") { showAbout = true }
                 }
-                if nearby.selectedName != nil {
-                    Section {
-                        Button("Forget This Mac", role: .destructive) {
-                            showForgetConfirmation = true
-                        }
+                Section {
+                    NavigationLink {
+                        PairedMacsSettingsView(store: nearby)
+                    } label: {
+                        LabeledContent("Paired Macs", value: "\(nearby.pairedNames.count)")
                     }
                 }
                 Section {
@@ -170,16 +169,6 @@ private struct DashboardSettingsView: View {
             .navigationTitle("Settings")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showAbout) { AboutThisMacView(store: nearby) }
-            .confirmationDialog("Forget This Mac?", isPresented: $showForgetConfirmation,
-                                titleVisibility: .visible) {
-                Button("Forget This Mac", role: .destructive) {
-                    nearby.forget()
-                    dismiss()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This iPhone will forget \(nearby.selectedDisplayName ?? "this Mac") and its saved pairing. You'll need a new passcode to connect again.")
-            }
         }
     }
 }
@@ -379,7 +368,6 @@ struct PairingView: View {
     @State private var manualHost = ""
     @State private var manualPort = ""
     @State private var showManualAddress = false
-    @State private var showForgetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -429,11 +417,11 @@ struct PairingView: View {
                     HapticToggle(title: "Haptics", isOn: $hapticsEnabled, controlsHaptics: true)
                 }
 
-                if store.selectedName != nil {
-                    Section {
-                        Button("Forget current Mac", role: .destructive) {
-                            showForgetConfirmation = true
-                        }
+                Section {
+                    NavigationLink {
+                        PairedMacsSettingsView(store: store)
+                    } label: {
+                        LabeledContent("Paired Macs", value: "\(store.pairedNames.count)")
                     }
                 }
 
@@ -452,15 +440,85 @@ struct PairingView: View {
             )) {
                 Button("OK") { pairingError = nil }
             } message: { Text(pairingError ?? "") }
-            .confirmationDialog("Forget this Mac?", isPresented: $showForgetConfirmation,
-                                titleVisibility: .visible) {
-                Button("Forget Mac", role: .destructive) {
-                    store.forget()
-                    dismiss()
+        }
+    }
+}
+
+private struct PairedMacsSettingsView: View {
+    @ObservedObject var store: NearbyMacStore
+    @State private var macToRevoke: NearbyMacStore.PairedMac?
+    @State private var revokeFailed = false
+
+    var body: some View {
+        Form {
+            if store.pairedMacs.isEmpty {
+                ContentUnavailableView("No Paired Macs", systemImage: "macbook.and.iphone",
+                                       description: Text("Pair with a nearby Mac or use its IP address to add one."))
+                    .listRowBackground(Color.clear)
+            } else {
+                ForEach(store.pairedMacs) { mac in
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "desktopcomputer")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(mac.name).font(.headline)
+                                if mac.name != mac.id {
+                                    Text(mac.id).font(.caption).foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                                Text(mac.isReachable ? "Reachable" : mac.isNearby ? "Nearby" : "Not nearby")
+                                    .font(.subheadline)
+                                    .foregroundStyle(mac.isReachable ? .green : .secondary)
+                            }
+                            Spacer(minLength: 0)
+                            if mac.isCurrent {
+                                Text("Current")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if store.revokingName == mac.id {
+                            ProgressView("Revoking pairing…")
+                                .font(.subheadline)
+                        } else {
+                            Button("Revoke Pairing", role: .destructive) { macToRevoke = mac }
+                                .font(.subheadline)
+                                .disabled(!store.canRevoke(mac))
+                        }
+                        if !mac.isNearby && !mac.isReachable {
+                            Text("Connect to this Mac to revoke its pairing.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 5)
                 }
-            } message: {
-                Text("You will need to pair again to see this Mac's stats.")
             }
+        }
+        .navigationTitle("Paired Macs")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Revoke pairing?", isPresented: Binding(
+            get: { macToRevoke != nil },
+            set: { if !$0 { macToRevoke = nil } }
+        ), titleVisibility: .visible) {
+            if let macToRevoke {
+                Button("Revoke \(macToRevoke.name)", role: .destructive) {
+                    store.revokePairing(for: macToRevoke.id) { succeeded in
+                        revokeFailed = !succeeded
+                    }
+                    self.macToRevoke = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { macToRevoke = nil }
+        } message: {
+            Text("This removes the pairing from both the Mac and this iPhone. You will need a new passcode to connect again.")
+        }
+        .alert("Couldn’t revoke pairing", isPresented: $revokeFailed) {
+            Button("OK") { revokeFailed = false }
+        } message: {
+            Text("The Mac did not confirm the request. Check that Stats Companion is running and try again.")
         }
     }
 }

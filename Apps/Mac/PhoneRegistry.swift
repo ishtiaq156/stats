@@ -101,15 +101,18 @@ final class PhoneRegistry {
         entries[id] = entry
     }
 
-    func revoke(_ id: UUID) {
+    @discardableResult
+    func revoke(_ id: UUID) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: id.uuidString
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { return false }
         UserDefaults.standard.removeObject(forKey: "StatsCompanion.lastSeen.\(id)")
         UserDefaults.standard.removeObject(forKey: Self.aliasKey(for: id))
         entries.removeValue(forKey: id)
+        return true
     }
 }

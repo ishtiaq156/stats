@@ -236,9 +236,21 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
             let encrypted = Data(data.dropFirst(prefixLength + 36))
             guard let request = try? SecurePacket.open(encrypted, using: key),
                   let command = String(data: request, encoding: .utf8),
-                  (["snapshot.v1", "history.v1", "about.v1"].contains(command) ||
+                  (["snapshot.v1", "history.v1", "about.v1", "pairing.revoke.v1"].contains(command) ||
                    command.hasPrefix("disk.settings.v1:")) else {
                 connection.cancel()
+                return
+            }
+            if command == "pairing.revoke.v1" {
+                guard let response = try? SecurePacket.seal(Data("ok".utf8), using: key),
+                      self.phones.revoke(phoneID) else {
+                    connection.cancel()
+                    return
+                }
+                self.publishPhones()
+                connection.send(content: SecurePacket.frame(response), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
                 return
             }
             let diskSettings: DiskSamplingSettings?

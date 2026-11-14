@@ -62,7 +62,17 @@ final class NearbyMacStore: ObservableObject {
         }
     }
 
+    struct PairedMac: Identifiable {
+        let id: String
+        let name: String
+        let isCurrent: Bool
+        let isNearby: Bool
+        let isReachable: Bool
+    }
+
     @Published private(set) var devices: [Device] = []
+    @Published private(set) var pairedNames: [String] = []
+    @Published private(set) var revokingName: String?
     @Published private(set) var snapshot: MetricSnapshot?
     @Published private(set) var history: [MetricSnapshot] = []
     @Published private(set) var selectedName: String?
@@ -89,6 +99,7 @@ final class NearbyMacStore: ObservableObject {
     private var activeHistoryConnection: NWConnection?
     private var activeAboutConnection: NWConnection?
     private var activeDiskSettingsConnection: NWConnection?
+    private var activeRevokeConnection: NWConnection?
     private var diskSettingsSendInFlight = false
     private var lastSentDiskSettings: (mac: String, settings: DiskSamplingSettings)?
     private var lastDiskSettingsAttempt: (mac: String, settings: DiskSamplingSettings, date: Date)?
@@ -109,6 +120,7 @@ final class NearbyMacStore: ObservableObject {
     }
     private static let lastMacKey = "StatsForIOS.lastMac"
     private static let lastMacDisplayNameKey = "StatsForIOS.lastMacDisplayName"
+    private static let pairedDisplayNamesKey = "StatsForIOS.pairedMacDisplayNames"
     private static let manualHostKey = "StatsForIOS.manualHost"
     private static let manualPortKey = "StatsForIOS.manualPort"
     static let diskUpdateIntervalKey = "Stats.diskUpdateInterval"
@@ -119,7 +131,23 @@ final class NearbyMacStore: ObservableObject {
     init() {
         scheduleRefresh()
         restoreLastMac()
+        reloadPairedMacs()
     }
+
+    var pairedMacs: [PairedMac] {
+        let savedNames = UserDefaults.standard.dictionary(forKey: Self.pairedDisplayNamesKey) as? [String: String] ?? [:]
+        return pairedNames.map { name in
+            let discovered = devices.first { $0.name == name }
+            return PairedMac(id: name,
+                             name: discovered?.displayName ?? (name == selectedName ? selectedDisplayName : nil)
+                                 ?? savedNames[name] ?? name,
+                             isCurrent: name == selectedName,
+                             isNearby: discovered != nil,
+                             isReachable: name == selectedName && selectedReachable)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func reloadPairedMacs() { pairedNames = PairingStore.names() }
 
     private func scheduleRefresh() {
         timer?.invalidate()
@@ -304,6 +332,7 @@ final class NearbyMacStore: ObservableObject {
                         completion(.failure(PasscodePairer.PairingError.credentialSaveFailed))
                         return
                     }
+                    self.reloadPairedMacs()
                     if let previousPhoneID { self.removeCachedAbout(for: previousPhoneID) }
                     self.selectedName = device.name
                     self.selectedDisplayName = device.displayName
@@ -400,9 +429,84 @@ final class NearbyMacStore: ObservableObject {
         return device.displayName
     }
 
-    func forget() {
-        if let selectedName { PairingStore.delete(for: selectedName) }
-        if let selectedPhoneID { removeCachedAbout(for: selectedPhoneID) }
+    func canRevoke(_ mac: PairedMac) -> Bool {
+        revokingName == nil && (mac.isNearby || mac.isReachable)
+    }
+
+    func revokePairing(for name: String, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        guard revokingName == nil, pairedNames.contains(name),
+              let endpoint = devices.first(where: { $0.name == name })?.endpoint
+                  ?? (name == selectedName && selectedReachable ? selectedEndpoint : nil),
+              let stored = PairingStore.load(for: name),
+              let credential = PairingStore.decode(stored),
+              let request = try? PairingWire.authenticatedRequest("pairing.revoke.v1",
+                                                                  phoneID: credential.phoneID,
+                                                                  key: credential.key) else {
+            completion(false)
+            return
+        }
+        revokingName = name
+        let connection = NWConnection(to: endpoint, using: .tcp)
+        activeRevokeConnection = connection
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let connection else { return }
+            switch state {
+            case .ready:
+                connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
+                    guard error == nil else {
+                        Task { @MainActor in self?.finishRevoke(connection, name: name, confirmed: false,
+                                                                 completion: completion) }
+                        return
+                    }
+                    connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, error in
+                        guard error == nil, let header, let length = SecurePacket.length(header) else {
+                            Task { @MainActor in self?.finishRevoke(connection, name: name, confirmed: false,
+                                                                     completion: completion) }
+                            return
+                        }
+                        connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, error in
+                            let confirmed = error == nil && body.flatMap {
+                                try? SecurePacket.open($0, using: credential.key)
+                            }.flatMap { String(data: $0, encoding: .utf8) } == "ok"
+                            Task { @MainActor in self?.finishRevoke(connection, name: name,
+                                                                     confirmed: confirmed, completion: completion) }
+                        }
+                    }
+                })
+            case .failed, .cancelled:
+                Task { @MainActor in self?.finishRevoke(connection, name: name, confirmed: false,
+                                                         completion: completion) }
+            default: break
+            }
+        }
+        connection.start(queue: .main)
+        Task { @MainActor [weak self, weak connection] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, let connection else { return }
+            self.finishRevoke(connection, name: name, confirmed: false, completion: completion)
+        }
+    }
+
+    private func finishRevoke(_ connection: NWConnection, name: String, confirmed: Bool,
+                              completion: @MainActor @Sendable (Bool) -> Void) {
+        guard activeRevokeConnection === connection else { return }
+        activeRevokeConnection = nil
+        revokingName = nil
+        connection.cancel()
+        completion(confirmed && forgetPairingLocally(for: name))
+    }
+
+    @discardableResult
+    private func forgetPairingLocally(for name: String) -> Bool {
+        guard pairedNames.contains(name) else { return false }
+        let phoneID = PairingStore.load(for: name).flatMap { PairingStore.decode($0)?.phoneID }
+        guard PairingStore.delete(for: name) else { return false }
+        if let phoneID { removeCachedAbout(for: phoneID) }
+        var savedNames = UserDefaults.standard.dictionary(forKey: Self.pairedDisplayNamesKey) as? [String: String] ?? [:]
+        savedNames.removeValue(forKey: name)
+        UserDefaults.standard.set(savedNames, forKey: Self.pairedDisplayNamesKey)
+        reloadPairedMacs()
+        guard selectedName == name else { return true }
         selectedName = nil
         selectedDisplayName = nil
         sessionRequested = false
@@ -429,12 +533,14 @@ final class NearbyMacStore: ObservableObject {
         defaults.removeObject(forKey: Self.manualHostKey)
         defaults.removeObject(forKey: Self.manualPortKey)
         defaults.removeObject(forKey: Self.resumeDashboardKey)
+        return true
     }
 
     private func remember(_ device: Device) {
         let defaults = UserDefaults.standard
         defaults.set(device.name, forKey: Self.lastMacKey)
         defaults.set(selectedDisplayName ?? device.displayName, forKey: Self.lastMacDisplayNameKey)
+        saveDisplayName(selectedDisplayName ?? device.displayName, for: device.name)
         if case let .hostPort(host, port) = device.endpoint {
             defaults.set(String(describing: host), forKey: Self.manualHostKey)
             defaults.set(Int(port.rawValue), forKey: Self.manualPortKey)
@@ -448,6 +554,13 @@ final class NearbyMacStore: ObservableObject {
         guard !name.isEmpty, selectedDisplayName != name else { return }
         selectedDisplayName = name
         UserDefaults.standard.set(name, forKey: Self.lastMacDisplayNameKey)
+        if let selectedName { saveDisplayName(name, for: selectedName) }
+    }
+
+    private func saveDisplayName(_ displayName: String, for name: String) {
+        var names = UserDefaults.standard.dictionary(forKey: Self.pairedDisplayNamesKey) as? [String: String] ?? [:]
+        names[name] = displayName
+        UserDefaults.standard.set(names, forKey: Self.pairedDisplayNamesKey)
     }
 
     private func refresh() {
@@ -898,5 +1011,20 @@ private enum PairingStore {
         return result as? Data
     }
 
-    static func delete(for name: String) { SecItemDelete(query(name) as CFDictionary) }
+    static func names() -> [String] {
+        var values = query("")
+        values.removeValue(forKey: kSecAttrAccount as String)
+        values[kSecReturnAttributes as String] = true
+        values[kSecMatchLimit as String] = kSecMatchLimitAll
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(values as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
+    @discardableResult
+    static func delete(for name: String) -> Bool {
+        let status = SecItemDelete(query(name) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
 }
