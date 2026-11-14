@@ -154,13 +154,6 @@ private struct DashboardSettingsView: View {
                     Button("About This Mac") { showAbout = true }
                 }
                 Section {
-                    NavigationLink {
-                        PairedMacsSettingsView(store: nearby)
-                    } label: {
-                        LabeledContent("Paired Macs", value: "\(nearby.pairedNames.count)")
-                    }
-                }
-                Section {
                     StatsSettingsFooter()
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
