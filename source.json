@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.9",
+          "buildVersion": "12",
+          "date": "2026-11-14T02:55:00Z",
+          "localizedDescription": "Disk settings now control sampling on the Mac and customize the iPhone Disk screen. The dashboard-wide refresh selector has been removed.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.16/Stats-v0.3.9-iOS.ipa",
+          "size": 2706805,
+          "sha256": "6d5598a913a9c116474ffad0916e8a23a061af0e95b17263327228168b8c1aa6",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.8",
           "buildVersion": "11",
           "date": "2026-11-13T15:11:49Z",
