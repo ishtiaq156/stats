@@ -262,6 +262,32 @@ public struct DiskDetails: Codable, Sendable, Equatable {
     }
 }
 
+/// Mac-side disk sampling controls sent by an authenticated iPhone.
+public struct DiskSamplingSettings: Codable, Sendable, Equatable {
+    public static let intervals = [1, 2, 3, 5, 10, 15, 30, 60]
+    public let updateInterval: Int
+    public let smartEnabled: Bool
+    public let smartUpdateInterval: Int
+    public let ataSMARTEnabled: Bool
+    public let topProcessCount: Int
+
+    public init(updateInterval: Int = 10, smartEnabled: Bool = true,
+                smartUpdateInterval: Int = 30, ataSMARTEnabled: Bool = false,
+                topProcessCount: Int = 5) {
+        self.updateInterval = updateInterval
+        self.smartEnabled = smartEnabled
+        self.smartUpdateInterval = smartUpdateInterval
+        self.ataSMARTEnabled = ataSMARTEnabled
+        self.topProcessCount = topProcessCount
+    }
+
+    public var isValid: Bool {
+        Self.intervals.contains(updateInterval) && Self.intervals.contains(smartUpdateInterval) &&
+            smartUpdateInterval >= updateInterval &&
+            [0, 3, 5, 8, 10, 15].contains(topProcessCount)
+    }
+}
+
 /// Preserves a 900-sample time window and reduces the wire response only when
 /// required by the encrypted packet limit. Historical rates remain per-volume.
 public struct MetricHistoryBuffer: Sendable {

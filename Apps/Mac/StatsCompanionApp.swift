@@ -82,8 +82,10 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var wifiLocationAuthorization: CLAuthorizationStatus = .notDetermined
     private var recentSnapshots = MetricHistoryBuffer()
     private let sampler = SystemSampler()
+    private var diskSettings = DiskSamplingSettings()
     private let wifiLocationAccess = WiFiLocationAccess()
     private var timer: Timer?
+    private var diskTimer: Timer?
     private var updateCheckTimer: Timer?
     private var updateCheckInFlight = false
     private var updateDownloadTask: Task<Void, Never>?
@@ -109,6 +111,12 @@ final class StatsCompanionModel: ObservableObject {
             self.refresh()
         }
         let defaults = UserDefaults.standard
+        if let saved = defaults.data(forKey: "StatsCompanion.diskSamplingSettings"),
+           let restored = try? JSONDecoder().decode(DiskSamplingSettings.self, from: saved),
+           restored.isValid {
+            diskSettings = restored
+        }
+        sampler.setDiskSamplingSettings(diskSettings)
         dockVisible = defaults.bool(forKey: "StatsCompanion.showDock")
         menuBarVisible = defaults.object(forKey: "StatsCompanion.showMenuBar") as? Bool ?? true
         if !dockVisible && !menuBarVisible { menuBarVisible = true }
@@ -123,6 +131,9 @@ final class StatsCompanionModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        diskTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.sampler.refreshDiskIfDue() }
+        }
         updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkForUpdates(silent: true) }
         }
@@ -134,6 +145,14 @@ final class StatsCompanionModel: ObservableObject {
     func refresh() {
         snapshot = sampler.sample()
         recentSnapshots.append(snapshot)
+    }
+
+    func setDiskSamplingSettings(_ settings: DiskSamplingSettings) {
+        guard settings.isValid, diskSettings != settings else { return }
+        diskSettings = settings
+        UserDefaults.standard.set(try? JSONEncoder().encode(settings),
+                                  forKey: "StatsCompanion.diskSamplingSettings")
+        sampler.setDiskSamplingSettings(settings)
     }
 
     var needsWiFiLocationAccess: Bool {
@@ -375,6 +394,8 @@ final class StatsCompanionModel: ObservableObject {
             self?.recentSnapshots.snapshots ?? []
         }, about: {
             SystemSampler.about()
+        }, onDiskSettings: { [weak self] settings in
+            self?.setDiskSamplingSettings(settings)
         }, onPort: { [weak self] port in
             self?.port = port
             self?.localAddress = Self.ipv4Address().map { "\($0):\(port)" }

@@ -13,6 +13,7 @@ private final class Runner {
     private var result: String?
     private var renamedEnrollment: PairingWire.Enrollment?
     private var revokedEnrollment: PairingWire.Enrollment?
+    private var appliedDiskSettings: DiskSamplingSettings?
 
     init() {
         server = MetricServer(
@@ -22,6 +23,7 @@ private final class Runner {
                 MacAboutInfo(modelName: "Pairing smoke Mac", chip: nil, memory: nil,
                              startupDisk: nil, serialNumber: nil, macOS: "Smoke", imagePNG: nil)
             },
+            onDiskSettings: { [weak self] settings in self?.appliedDiskSettings = settings },
             onPort: { [weak self] port in self?.port = port; self?.startPairingIfReady() },
             onDiscovery: { _, _ in },
             onPhones: { [weak self] phones in
@@ -62,7 +64,7 @@ private final class Runner {
                 self.startPairingIfReady()
             }
         }
-        let deadline = Date().addingTimeInterval(15)
+        let deadline = Date().addingTimeInterval(20)
         while result == nil && Date() < deadline {
             RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
         }
@@ -153,11 +155,65 @@ private final class Runner {
                     self.result = "Credential was not restored from Keychain"
                     return
                 }
-                self.renamedEnrollment = enrollment
-                self.server.renamePhone(enrollment.phoneID, to: "Renamed test iPhone")
                 connection.cancel()
+                self.sendDiskSettings(enrollment)
             }
         }
+    }
+
+    private func sendDiskSettings(_ enrollment: PairingWire.Enrollment) {
+        guard let port else { result = "Missing port for disk settings"; return }
+        let settings = DiskSamplingSettings(updateInterval: 5, smartEnabled: false,
+                                            smartUpdateInterval: 30, ataSMARTEnabled: true,
+                                            topProcessCount: 3)
+        guard let encoded = try? JSONEncoder().encode(settings),
+              let request = try? PairingWire.authenticatedRequest(
+                "disk.settings.v1:\(encoded.base64EncodedString())",
+                phoneID: enrollment.phoneID, key: enrollment.credential) else {
+            result = "Could not encode disk settings"
+            return
+        }
+        let connection = NWConnection(to: .hostPort(host: "127.0.0.1",
+            port: NWEndpoint.Port(rawValue: port)!), using: .tcp)
+        fetch = connection
+        connection.stateUpdateHandler = { [weak self] state in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
+                        MainActor.assumeIsolated {
+                            guard error == nil else { self.result = "Disk settings send failed"; return }
+                            connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, _ in
+                                MainActor.assumeIsolated {
+                                    guard let header, let length = SecurePacket.length(header) else {
+                                        self.result = "Missing disk settings response"
+                                        return
+                                    }
+                                    connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, _ in
+                                        MainActor.assumeIsolated {
+                                            guard let body,
+                                                  let opened = try? SecurePacket.open(body, using: enrollment.credential),
+                                                  String(data: opened, encoding: .utf8) == "ok",
+                                                  self.appliedDiskSettings == settings else {
+                                                self.result = "Disk settings were not applied"
+                                                return
+                                            }
+                                            connection.cancel()
+                                            self.renamedEnrollment = enrollment
+                                            self.server.renamePhone(enrollment.phoneID, to: "Renamed test iPhone")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    })
+                case .failed(let error): self.result = "Disk settings connection failed: \(error)"
+                default: break
+                }
+            }
+        }
+        connection.start(queue: .main)
     }
 
     private func checkRevoked(_ enrollment: PairingWire.Enrollment) {

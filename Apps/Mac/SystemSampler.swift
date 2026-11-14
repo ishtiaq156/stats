@@ -42,6 +42,7 @@ final class SystemSampler {
     private var diskFetching = false
     private var lastDiskFetch: Date = .distantPast
     private var cachedDiskDetails: DiskDetails?
+    private var diskUpdateInterval: TimeInterval = 10
 
     // Hardware identity and icon are stable for the lifetime of the companion process.
     // Keep the expensive system_profiler invocation and PNG rendering to one fetch.
@@ -143,6 +144,17 @@ final class SystemSampler {
         // its captured authorization and is rejected if the state changed.
         cachedNetworkAux = nil
         lastNetworkAuxFetch = .distantPast
+    }
+
+    func setDiskSamplingSettings(_ settings: DiskSamplingSettings) {
+        guard settings.isValid else { return }
+        diskUpdateInterval = TimeInterval(settings.updateInterval)
+        lastDiskFetch = .distantPast
+        Task.detached(priority: .utility) { [reader = diskReader] in reader.configure(settings) }
+    }
+
+    func refreshDiskIfDue() {
+        refreshDiskIfNeeded(at: .now)
     }
 
     private func cpuUsage(at date: Date) -> (usage: Double?, details: CPUDetails) {
@@ -484,7 +496,7 @@ final class SystemSampler {
     // Disk Arbitration, driver counters and process enumeration can briefly
     // block (especially for external volumes). Fetch off the UI sampling timer.
     private func refreshDiskIfNeeded(at date: Date) {
-        guard !diskFetching, date.timeIntervalSince(lastDiskFetch) >= 4 else { return }
+        guard !diskFetching, date.timeIntervalSince(lastDiskFetch) >= diskUpdateInterval else { return }
         diskFetching = true
         lastDiskFetch = date
         Task.detached(priority: .utility) { [weak self, reader = diskReader] in
@@ -926,6 +938,17 @@ private final class DiskSensorReader: @unchecked Sendable {
     private var deviceSamples: [UInt64: CounterSample] = [:]
     private var processSamples: [pid_t: ProcessSample] = [:]
     private var smartCache: [String: (until: TimeInterval, value: DiskSMART?)] = [:]
+    private var ataEnableAttempted = Set<String>()
+    private var settings = DiskSamplingSettings()
+
+    func configure(_ settings: DiskSamplingSettings) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.settings = settings
+        smartCache.removeAll()
+        ataEnableAttempted.removeAll()
+        if settings.topProcessCount == 0 { processSamples.removeAll() }
+    }
 
     func read() -> DiskDetails {
         lock.lock()
@@ -997,13 +1020,14 @@ private final class DiskSensorReader: @unchecked Sendable {
                 readBytesPerSecond: activity?.readRate,
                 writeBytesPerSecond: activity?.writeRate,
                 totalReadBytes: activity?.read, totalWrittenBytes: activity?.written,
-                smart: smartStatus(for: path, cacheID: id, at: time)
+                smart: smartStatus(for: path, bsdName: bsdName, cacheID: id, at: time)
             ))
         }
         deviceSamples = deviceSamples.filter { activeDrivers.contains($0.key) }
         let presentVolumes = Set(volumes.map(\.id))
         smartCache = smartCache.filter { presentVolumes.contains($0.key) }
-        return DiskDetails(volumes: volumes, topProcesses: readTopProcesses(at: time))
+        return DiskDetails(volumes: volumes,
+                           topProcesses: settings.topProcessCount == 0 ? [] : readTopProcesses(at: time))
     }
 
     private func fileSystem(_ path: String) -> (kind: String, total: UInt64, free: UInt64)? {
@@ -1078,13 +1102,11 @@ private final class DiskSensorReader: @unchecked Sendable {
     /// diskutil exposes some NVMe SMART counters directly for mounted disks.
     /// These keys are explicitly documented by macOS as device-dependent; each
     /// field remains nil when absent, unrecognized, or outside numeric range.
-    private func smartStatus(for mountPath: String, cacheID: String,
+    private func smartStatus(for mountPath: String, bsdName: String?, cacheID: String,
                              at time: TimeInterval) -> DiskSMART? {
+        guard settings.smartEnabled else { return nil }
         if let cached = smartCache[cacheID], cached.until > time { return cached.value }
-        guard let info = Self.diskInfo(mountPath) else {
-            smartCache[cacheID] = (time + 90, nil)
-            return nil
-        }
+        let info = Self.diskInfo(mountPath) ?? [:]
         let status = (info["SMARTStatus"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         var values = info["SMARTDeviceSpecificKeysMayVaryNotGuaranteed"] as? [String: Any] ?? [:]
         // Some APFS volumes expose SMART only on their physical store. If a
@@ -1095,6 +1117,11 @@ private final class DiskSensorReader: @unchecked Sendable {
            let match = partition.range(of: #"^disk[0-9]+"#, options: .regularExpression),
            let physical = Self.diskInfo(String(partition[match])) {
             values = physical["SMARTDeviceSpecificKeysMayVaryNotGuaranteed"] as? [String: Any] ?? [:]
+        }
+        if values.isEmpty, settings.ataSMARTEnabled, let bsdName,
+           let ata = ataSMART(for: bsdName, status: status) {
+            smartCache[cacheID] = (time + TimeInterval(settings.smartUpdateInterval), ata)
+            return ata
         }
 
         func number(_ key: String) -> UInt64? {
@@ -1139,8 +1166,77 @@ private final class DiskSensorReader: @unchecked Sendable {
                              criticalWarning: warning, availableSparePercent: spare,
                              status: status)
         }()
-        smartCache[cacheID] = (time + 90, smart)
+        smartCache[cacheID] = (time + TimeInterval(settings.smartUpdateInterval), smart)
         return smart
+    }
+
+    private func ataSMART(for bsdName: String, status: String?) -> DiskSMART? {
+        let clientID = CFUUIDGetConstantUUIDWithBytes(nil,
+            0x24, 0x51, 0x4B, 0x7A, 0x28, 0x04, 0x11, 0xD6,
+            0x8A, 0x02, 0x00, 0x30, 0x65, 0x70, 0x48, 0x66)
+        let interfaceID = CFUUIDGetConstantUUIDWithBytes(nil,
+            0x08, 0xAB, 0xE2, 0x1C, 0x20, 0xD4, 0x11, 0xD6,
+            0x8D, 0xF6, 0x00, 0x03, 0x93, 0x5A, 0x76, 0xB2)
+        let pluginID = CFUUIDGetConstantUUIDWithBytes(nil,
+            0xC2, 0x44, 0xE8, 0x58, 0x10, 0x9C, 0x11, 0xD4,
+            0x91, 0xD4, 0x00, 0x50, 0xE4, 0xC6, 0x42, 0x6F)
+        var device = IOServiceGetMatchingService(kIOMainPortDefault,
+            IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        guard device != 0 else { return nil }
+        while IOObjectConformsTo(device, kIOBlockStorageDeviceClass) == 0 {
+            var parent: io_registry_entry_t = 0
+            guard IORegistryEntryGetParentEntry(device, kIOServicePlane, &parent) == KERN_SUCCESS,
+                  parent != 0 else { IOObjectRelease(device); return nil }
+            IOObjectRelease(device)
+            device = parent
+        }
+        defer { IOObjectRelease(device) }
+        guard let capability = IORegistryEntryCreateCFProperty(device, "SMART Capable" as CFString,
+                                                               kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool,
+              capability else { return nil }
+
+        var plugin: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?
+        var smartInterface: UnsafeMutablePointer<UnsafeMutablePointer<IOATASMARTInterface>?>?
+        var score: Int32 = 0
+        guard IOCreatePlugInInterfaceForService(device, clientID, pluginID,
+                                               &plugin, &score) == KERN_SUCCESS else { return nil }
+        defer { if plugin != nil { IODestroyPlugInInterface(plugin) } }
+        let query = withUnsafeMutablePointer(to: &smartInterface) {
+            $0.withMemoryRebound(to: Optional<LPVOID>.self, capacity: 1) {
+                plugin?.pointee?.pointee.QueryInterface(plugin,
+                    CFUUIDGetUUIDBytes(interfaceID), $0) ?? KERN_NOT_FOUND
+            }
+        }
+        guard query == KERN_SUCCESS else { return nil }
+        defer { if smartInterface != nil { _ = plugin?.pointee?.pointee.Release(smartInterface) } }
+        guard let smart = smartInterface?.pointee else { return nil }
+        var data = ATASMARTData()
+        var result = smart.pointee.SMARTReadData(smartInterface, &data)
+        if result != KERN_SUCCESS && ataEnableAttempted.insert(bsdName).inserted {
+            _ = smart.pointee.SMARTEnableDisableOperations(smartInterface, true)
+            result = smart.pointee.SMARTReadData(smartInterface, &data)
+        }
+        guard result == KERN_SUCCESS else { return nil }
+
+        var attributes: [Int: (current: Int, raw: UInt64)] = [:]
+        withUnsafeBytes(of: &data) { bytes in
+            for index in 0..<30 {
+                let offset = 2 + index * 12
+                guard offset + 11 <= bytes.count else { break }
+                let id = Int(bytes[offset])
+                guard id != 0 else { continue }
+                var raw: UInt64 = 0
+                for byte in 0..<6 { raw |= UInt64(bytes[offset + 5 + byte]) << (8 * byte) }
+                attributes[id] = (Int(bytes[offset + 3]), raw)
+            }
+        }
+        let temperature = attributes[194]?.raw ?? attributes[190]?.raw
+        let life = [231, 202, 177, 173, 169, 233].compactMap { attributes[$0]?.current }.first
+        return DiskSMART(temperatureCelsius: temperature.map { Double($0 & 0xFF) },
+                         healthPercent: life.map { Double(min(100, max(0, $0))) },
+                         powerCycles: attributes[12]?.raw,
+                         powerOnHours: attributes[9]?.raw,
+                         status: status)
     }
 
     private static func diskInfo(_ path: String) -> [String: Any]? {
@@ -1194,7 +1290,7 @@ private final class DiskSensorReader: @unchecked Sendable {
             let lhs = max($0.readRate, $0.writeRate)
             let rhs = max($1.readRate, $1.writeRate)
             return lhs == rhs ? $0.pid < $1.pid : lhs > rhs
-        }.prefix(8).map { item in
+        }.prefix(settings.topProcessCount).map { item in
             var nameBuffer = [CChar](repeating: 0, count: 256)
             let length = proc_name(item.pid, &nameBuffer, UInt32(nameBuffer.count))
             let executable = length > 0 ? String(decoding: nameBuffer.prefix(while: { $0 != 0 })

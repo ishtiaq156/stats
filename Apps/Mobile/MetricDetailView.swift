@@ -1207,6 +1207,17 @@ private struct DiskDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("Stats.showRemovableDisks") private var showRemovableDisks = false
+    @AppStorage(DiskDisplayPreference.selectedDiskKey) private var selectedDiskID = ""
+    @AppStorage(DiskDisplayPreference.processCountKey) private var processCount = 5
+    @AppStorage(DiskDisplayPreference.showSpeedKey) private var showDiskSpeed = false
+    @AppStorage(DiskDisplayPreference.showTextKey) private var showDiskText = false
+    @AppStorage(DiskDisplayPreference.speedBaseKey) private var speedBase = "byte"
+    @AppStorage(DiskDisplayPreference.speedUnitKey) private var speedUnit = "auto"
+    @AppStorage(DiskDisplayPreference.textTemplateKey) private var textTemplate = "$capacity.free/$capacity.total"
+    @AppStorage(NearbyMacStore.diskUpdateIntervalKey) private var diskUpdateInterval = 10
+    @AppStorage(NearbyMacStore.diskSMARTKey) private var smartEnabled = true
+    @AppStorage(NearbyMacStore.diskSMARTIntervalKey) private var smartInterval = 30
+    @AppStorage(NearbyMacStore.diskATASMARTKey) private var ataSMARTEnabled = false
     @State private var capturedHistory: [String: [DiskIOPoint]] = [:]
     @State private var showingSettings = false
 
@@ -1245,7 +1256,7 @@ private struct DiskDetailView: View {
                         DiskVolumeCard(volume: volume,
                                        history: history(for: volume.id),
                                        background: panelColor,
-                                       readColor: readColor,
+                                       readColor: readColor, speedBase: speedBase, speedUnit: speedUnit,
                                        writeColor: writeColor)
                     }
                 } else if let snapshot = store.snapshot,
@@ -1254,7 +1265,8 @@ private struct DiskDetailView: View {
                                    legacyTotal: snapshot.diskTotalBytes,
                                    legacyFree: snapshot.diskFreeBytes,
                                    history: [], background: panelColor,
-                                   readColor: readColor, writeColor: writeColor)
+                                   readColor: readColor, speedBase: speedBase,
+                                   speedUnit: speedUnit, writeColor: writeColor)
                 } else {
                     ContentUnavailableView(
                         "Waiting for disk readings",
@@ -1266,7 +1278,7 @@ private struct DiskDetailView: View {
                     .background(panelColor, in: RoundedRectangle(cornerRadius: 18))
                 }
 
-                processCard
+                if processCount > 0 { processCard }
             }
             .frame(maxWidth: 540)
             .padding(.horizontal, 14)
@@ -1288,11 +1300,77 @@ private struct DiskDetailView: View {
             NavigationStack {
                 Form {
                     Section {
+                        Picker("Update interval", selection: $diskUpdateInterval) {
+                            ForEach(DiskSamplingSettings.intervals, id: \.self) { seconds in
+                                Text("\(seconds) seconds").tag(seconds)
+                            }
+                        }
+                        Picker("Number of top processes", selection: $processCount) {
+                            ForEach([0, 3, 5, 8, 10, 15], id: \.self) { count in
+                                Text(count == 0 ? "Off" : "\(count)").tag(count)
+                            }
+                        }
+                    } header: {
+                        Text("Reading")
+                    } footer: {
+                        Text("Sampling settings apply to the connected Mac. The dashboard updates every 2 seconds.")
+                    }
+                    Section {
+                        Picker("Disk to show", selection: $selectedDiskID) {
+                            Text("Startup disk").tag("")
+                            ForEach(volumes.filter { $0.mountPath != "/" }) { volume in
+                                Text(volume.name).tag(volume.id)
+                            }
+                        }
                         Toggle("Show removable disks", isOn: $showRemovableDisks)
                     } header: {
                         Text("Volumes")
                     } footer: {
-                        Text("Includes mounted disk images and removable drives.")
+                        Text("Removable disks include mounted disk images and removable drives. The selected disk is used on the dashboard.")
+                    }
+                    if showDiskSpeed {
+                        Section("Disk read and write speeds") {
+                            Picker("Base", selection: $speedBase) {
+                                Text("Bytes").tag("byte")
+                                Text("Bits").tag("bit")
+                            }
+                            Picker("Units", selection: $speedUnit) {
+                                Text("Auto").tag("auto")
+                                Text("KB/Kb").tag("KB")
+                                Text("MB/Mb").tag("MB")
+                                Text("GB/Gb").tag("GB")
+                                Text("TB/Tb").tag("TB")
+                            }
+                        }
+                    }
+                    Section {
+                        Toggle("SMART", isOn: $smartEnabled)
+                        if smartEnabled {
+                            Picker("Update interval", selection: $smartInterval) {
+                                ForEach(DiskSamplingSettings.intervals.filter { $0 >= diskUpdateInterval }, id: \.self) { seconds in
+                                    Text("\(seconds) seconds").tag(seconds)
+                                }
+                            }
+                            Toggle("ATA SMART", isOn: $ataSMARTEnabled)
+                        }
+                    } header: {
+                        Text("SMART")
+                    } footer: {
+                        Text("SMART refreshes when Disk is sampled, so its interval cannot be shorter than the Disk interval.")
+                    }
+                    if showDiskText {
+                        Section {
+                            TextField("Text widget value", text: $textTemplate)
+                            Text(DiskDisplayPreference.text(textTemplate,
+                                 volume: DiskDisplayPreference.selectedVolume(
+                                    in: store.snapshot ?? MetricSnapshot(machineName: "Mac"),
+                                    id: selectedDiskID, showRemovable: showRemovableDisks)))
+                                .foregroundStyle(.secondary)
+                        } header: {
+                            Text("Disk text")
+                        } footer: {
+                            Text("Use $capacity.free, $capacity.used, $capacity.total, $percentage.free, or $percentage.used.")
+                        }
                     }
                 }
                 .navigationTitle("Disk Settings")
@@ -1303,11 +1381,28 @@ private struct DiskDetailView: View {
                     }
                 }
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
+        }
+        .onChange(of: diskUpdateInterval) { _, interval in
+            if smartInterval < interval { smartInterval = interval }
+            store.syncDiskSamplingSettings()
+        }
+        .onChange(of: processCount) { _, _ in store.syncDiskSamplingSettings() }
+        .onChange(of: smartEnabled) { _, _ in store.syncDiskSamplingSettings() }
+        .onChange(of: smartInterval) { _, _ in store.syncDiskSamplingSettings() }
+        .onChange(of: ataSMARTEnabled) { _, _ in store.syncDiskSamplingSettings() }
+        .onChange(of: showRemovableDisks) { _, visible in
+            if !visible,
+               store.snapshot?.diskDetails?.volumes.first(where: { $0.id == selectedDiskID })?.isRemovable == true {
+                selectedDiskID = ""
+            }
         }
         .onAppear { capture(store.snapshot) }
         .onChange(of: store.snapshot) { _, snapshot in capture(snapshot) }
-        .onChange(of: store.selectedName) { _, _ in capturedHistory.removeAll() }
+        .onChange(of: store.selectedName) { _, _ in
+            capturedHistory.removeAll()
+            selectedDiskID = ""
+        }
     }
 
     private func history(for volumeID: String) -> [DiskIOPoint] {
@@ -1395,7 +1490,7 @@ private struct DiskDetailView: View {
                 let ranked = Array(reported.sorted {
                     diskRateValue($0.readBytesPerSecond) + diskRateValue($0.writeBytesPerSecond) >
                     diskRateValue($1.readBytesPerSecond) + diskRateValue($1.writeBytesPerSecond)
-                }.prefix(8))
+                }.prefix(processCount))
                 if ranked.isEmpty {
                     Text("No processes reported")
                         .font(.subheadline)
@@ -1423,16 +1518,16 @@ private struct DiskDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.subheadline.weight(.medium))
                 HStack(spacing: 14) {
-                    Text("Read \(diskRate(process.readBytesPerSecond))")
+                    Text("Read \(diskRate(process.readBytesPerSecond, base: speedBase, unit: speedUnit))")
                         .foregroundStyle(readColor)
-                    Text("Write \(diskRate(process.writeBytesPerSecond))")
+                    Text("Write \(diskRate(process.writeBytesPerSecond, base: speedBase, unit: speedUnit))")
                         .foregroundStyle(writeColor)
                 }
                 .font(.caption)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(name), process \(process.pid)")
-            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond)), write \(diskRate(process.writeBytesPerSecond))")
+            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond, base: speedBase, unit: speedUnit)), write \(diskRate(process.writeBytesPerSecond, base: speedBase, unit: speedUnit))")
         } else {
             HStack(spacing: 8) {
                 HStack(spacing: 7) {
@@ -1447,10 +1542,10 @@ private struct DiskDetailView: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(diskRate(process.readBytesPerSecond))
+                Text(diskRate(process.readBytesPerSecond, base: speedBase, unit: speedUnit))
                     .frame(width: 76, alignment: .trailing)
                     .foregroundStyle(readColor)
-                Text(diskRate(process.writeBytesPerSecond))
+                Text(diskRate(process.writeBytesPerSecond, base: speedBase, unit: speedUnit))
                     .frame(width: 76, alignment: .trailing)
                     .foregroundStyle(writeColor)
             }
@@ -1458,16 +1553,13 @@ private struct DiskDetailView: View {
             .monospacedDigit()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(name), process \(process.pid)")
-            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond)), write \(diskRate(process.writeBytesPerSecond))")
+            .accessibilityValue("Read \(diskRate(process.readBytesPerSecond, base: speedBase, unit: speedUnit)), write \(diskRate(process.writeBytesPerSecond, base: speedBase, unit: speedUnit))")
         }
     }
 }
 
-private func diskRate(_ bytesPerSecond: Double?) -> String {
-    guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond >= 0 else { return "—" }
-    // ByteCountFormatter spells zero as "Zero KB" on some locales.
-    if bytesPerSecond < 1 { return "0 B/s" }
-    return MetricFormat.rate(bytesPerSecond)
+private func diskRate(_ bytesPerSecond: Double?, base: String, unit: String) -> String {
+    DiskDisplayPreference.rate(bytesPerSecond, base: base, unit: unit)
 }
 
 private func diskRateValue(_ bytesPerSecond: Double?) -> Double {
@@ -1566,6 +1658,8 @@ private struct DiskVolumeCard: View {
     let history: [DiskIOPoint]
     let background: Color
     let readColor: Color
+    let speedBase: String
+    let speedUnit: String
     let writeColor: Color
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -1655,7 +1749,7 @@ private struct DiskVolumeCard: View {
                 .accessibilityHidden(true)
             Text(name)
                 .foregroundStyle(.secondary)
-            Text(diskRate(rate))
+            Text(diskRate(rate, base: speedBase, unit: speedUnit))
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
                 .monospacedDigit()
@@ -1673,7 +1767,7 @@ private struct DiskVolumeCard: View {
             .frame(height: 95)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(name) read and write activity history")
-            .accessibilityValue("\(history.count) samples; blue reads below center and red writes above center, independently scaled. Last read \(diskRate(readRate)), write \(diskRate(writeRate))")
+            .accessibilityValue("\(history.count) samples; blue reads below center and red writes above center, independently scaled. Last read \(diskRate(readRate, base: speedBase, unit: speedUnit)), write \(diskRate(writeRate, base: speedBase, unit: speedUnit))")
         } else {
             VStack(spacing: 5) {
                 Image(systemName: "chart.xyaxis.line")

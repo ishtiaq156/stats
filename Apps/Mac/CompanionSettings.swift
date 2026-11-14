@@ -963,6 +963,10 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.12", date: "November 13, 2026", changes: [
+            "Let paired iPhones configure Disk sampling, process count, and SMART readings.",
+            "Add optional ATA SMART details for supported drives."
+        ]),
         .init(version: "0.3.11", date: "November 13, 2026", changes: [
             "Find Mac updates in combined iPhone and Companion releases when the GitHub tag and Mac app version differ."
         ]),

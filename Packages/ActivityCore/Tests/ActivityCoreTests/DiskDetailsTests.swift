@@ -52,6 +52,18 @@ final class DiskDetailsTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(DiskVolume.self, from: older).isRemovable)
     }
 
+    func testDiskSamplingSettingsValidateSupportedValues() throws {
+        let settings = DiskSamplingSettings(updateInterval: 1, smartEnabled: false,
+                                            smartUpdateInterval: 60, ataSMARTEnabled: true,
+                                            topProcessCount: 15)
+        XCTAssertTrue(settings.isValid)
+        XCTAssertEqual(try JSONDecoder().decode(DiskSamplingSettings.self,
+                        from: JSONEncoder().encode(settings)), settings)
+        XCTAssertFalse(DiskSamplingSettings(updateInterval: 4).isValid)
+        XCTAssertFalse(DiskSamplingSettings(updateInterval: 30, smartUpdateInterval: 10).isValid)
+        XCTAssertFalse(DiskSamplingSettings(topProcessCount: 16).isValid)
+    }
+
     func testHistoricalSnapshotRetainsBoundedRatesAndRemovesMetadata() {
         let longName = String(repeating: "Long Volume Name ", count: 100)
         let volumes = (0..<9).map { volume($0, name: longName) }

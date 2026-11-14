@@ -73,7 +73,6 @@ final class NearbyMacStore: ObservableObject {
     @Published private(set) var discoveryError: String?
     @Published private(set) var aboutInfo: MacAboutInfo?
     @Published private(set) var aboutError: String?
-    @Published private(set) var refreshIntervalSeconds: Int
     private var aboutFetchedAt: Date?
     private var aboutLastAttemptAt: Date?
     private static let aboutCacheLifetime: TimeInterval = 60 * 60
@@ -89,6 +88,10 @@ final class NearbyMacStore: ObservableObject {
     private var activeSnapshotConnection: NWConnection?
     private var activeHistoryConnection: NWConnection?
     private var activeAboutConnection: NWConnection?
+    private var activeDiskSettingsConnection: NWConnection?
+    private var diskSettingsSendInFlight = false
+    private var lastSentDiskSettings: (mac: String, settings: DiskSamplingSettings)?
+    private var lastDiskSettingsAttempt: (mac: String, settings: DiskSamplingSettings, date: Date)?
     private var pairer: PasscodePairer?
     private var timer: Timer?
     private var inFlight = false
@@ -108,28 +111,19 @@ final class NearbyMacStore: ObservableObject {
     private static let lastMacDisplayNameKey = "StatsForIOS.lastMacDisplayName"
     private static let manualHostKey = "StatsForIOS.manualHost"
     private static let manualPortKey = "StatsForIOS.manualPort"
-    private static let refreshIntervalKey = "StatsForIOS.refreshIntervalSeconds"
+    static let diskUpdateIntervalKey = "Stats.diskUpdateInterval"
+    static let diskSMARTKey = "Stats.diskSMART"
+    static let diskSMARTIntervalKey = "Stats.diskSMARTInterval"
+    static let diskATASMARTKey = "Stats.diskATASMART"
     private static let resumeDashboardKey = "StatsForIOS.resumeDashboard"
-    static let refreshIntervals = [2, 5, 10, 30]
-
     init() {
-        let storedInterval = UserDefaults.standard.integer(forKey: Self.refreshIntervalKey)
-        refreshIntervalSeconds = Self.refreshIntervals.contains(storedInterval) ? storedInterval : 2
         scheduleRefresh()
         restoreLastMac()
     }
 
-    func setRefreshInterval(_ seconds: Int) {
-        guard Self.refreshIntervals.contains(seconds), refreshIntervalSeconds != seconds else { return }
-        refreshIntervalSeconds = seconds
-        UserDefaults.standard.set(seconds, forKey: Self.refreshIntervalKey)
-        scheduleRefresh()
-        refresh()
-    }
-
     private func scheduleRefresh() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(refreshIntervalSeconds), repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.startBrowserIfNeeded()
                 self?.refresh()
@@ -510,6 +504,86 @@ final class NearbyMacStore: ObservableObject {
         try PairingWire.authenticatedRequest(command, phoneID: phoneID, key: key)
     }
 
+    func syncDiskSamplingSettings() {
+        let defaults = UserDefaults.standard
+        let interval = defaults.object(forKey: Self.diskUpdateIntervalKey) as? Int ?? 10
+        let smart = defaults.object(forKey: Self.diskSMARTKey) as? Bool ?? true
+        let smartInterval = defaults.object(forKey: Self.diskSMARTIntervalKey) as? Int ?? 30
+        let ataSMART = defaults.bool(forKey: Self.diskATASMARTKey)
+        let processCount = defaults.object(forKey: DiskDisplayPreference.processCountKey) as? Int ?? 5
+        let settings = DiskSamplingSettings(updateInterval: interval, smartEnabled: smart,
+                                            smartUpdateInterval: smartInterval,
+                                            ataSMARTEnabled: ataSMART, topProcessCount: processCount)
+        guard settings.isValid, !diskSettingsSendInFlight, let mac = selectedName,
+              let endpoint = selectedEndpoint, let key = selectedKey,
+              let phoneID = selectedPhoneID else { return }
+        if let previous = lastSentDiskSettings,
+           previous.mac == mac && previous.settings == settings { return }
+        if let attempt = lastDiskSettingsAttempt, attempt.mac == mac,
+           attempt.settings == settings, Date().timeIntervalSince(attempt.date) < 30 { return }
+        guard let data = try? JSONEncoder().encode(settings),
+              let request = try? makeRequest("disk.settings.v1:\(data.base64EncodedString())",
+                                             key: key, phoneID: phoneID) else { return }
+        diskSettingsSendInFlight = true
+        lastDiskSettingsAttempt = (mac, settings, .now)
+        activeDiskSettingsConnection?.cancel()
+        let connection = NWConnection(to: endpoint, using: .tcp)
+        activeDiskSettingsConnection = connection
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let connection else { return }
+            switch state {
+            case .ready:
+                connection.send(content: SecurePacket.frame(request), completion: .contentProcessed { error in
+                    Task { @MainActor in
+                        guard let self, self.activeDiskSettingsConnection === connection else { return }
+                        guard error == nil else {
+                            self.finishDiskSettings(connection, mac: mac, settings: settings, applied: false)
+                            return
+                        }
+                        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { header, _, _, _ in
+                            Task { @MainActor in
+                                guard let header, let length = SecurePacket.length(header) else {
+                                    self.finishDiskSettings(connection, mac: mac, settings: settings, applied: false)
+                                    return
+                                }
+                                connection.receive(minimumIncompleteLength: length, maximumLength: length) { body, _, _, _ in
+                                    Task { @MainActor in
+                                        let applied = body.flatMap { try? SecurePacket.open($0, using: key) }
+                                            .flatMap { String(data: $0, encoding: .utf8) } == "ok"
+                                        self.finishDiskSettings(connection, mac: mac, settings: settings,
+                                                                applied: applied)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            case .failed, .cancelled:
+                Task { @MainActor in
+                    self?.finishDiskSettings(connection, mac: mac, settings: settings, applied: false)
+                }
+            default: break
+            }
+        }
+        connection.start(queue: .main)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak connection] in
+            guard let connection else { return }
+            MainActor.assumeIsolated {
+                self?.finishDiskSettings(connection, mac: mac, settings: settings, applied: false)
+            }
+        }
+    }
+
+    private func finishDiskSettings(_ connection: NWConnection, mac: String,
+                                    settings: DiskSamplingSettings, applied: Bool) {
+        guard activeDiskSettingsConnection === connection else { return }
+        diskSettingsSendInFlight = false
+        activeDiskSettingsConnection = nil
+        if applied { lastSentDiskSettings = (mac, settings) }
+        connection.cancel()
+        if applied { syncDiskSamplingSettings() }
+    }
+
     private func receiveHeader(on connection: NWConnection, key: Data, generation: UUID, requestID: UUID) {
         connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] data, _, _, error in
             Task { @MainActor in
@@ -539,6 +613,7 @@ final class NearbyMacStore: ObservableObject {
                     self?.fail(); return
                 }
                 self?.snapshot = snapshot
+                self?.syncDiskSamplingSettings()
                 self?.updateSelectedDisplayName(snapshot.machineName.trimmingCharacters(in: .whitespacesAndNewlines))
                 self?.selectedReachable = true
                 if self?.sessionRequested == true { self?.sessionActive = true }

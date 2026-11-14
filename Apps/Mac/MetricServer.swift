@@ -14,6 +14,7 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
     private let snapshot: @MainActor @Sendable () -> MetricSnapshot
     private let history: @MainActor @Sendable () -> [MetricSnapshot]
     private let about: @MainActor @Sendable () -> MacAboutInfo
+    private let onDiskSettings: @MainActor @Sendable (DiskSamplingSettings) -> Void
     private let onPort: @MainActor @Sendable (UInt16) -> Void
     private let onDiscovery: @MainActor @Sendable (Bool, String?) -> Void
     private let onPhones: @MainActor @Sendable ([PairedPhone]) -> Void
@@ -38,6 +39,7 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
     init(snapshot: @escaping @MainActor @Sendable () -> MetricSnapshot,
          history: @escaping @MainActor @Sendable () -> [MetricSnapshot],
          about: @escaping @MainActor @Sendable () -> MacAboutInfo,
+         onDiskSettings: @escaping @MainActor @Sendable (DiskSamplingSettings) -> Void,
          onPort: @escaping @MainActor @Sendable (UInt16) -> Void,
          onDiscovery: @escaping @MainActor @Sendable (Bool, String?) -> Void,
          onPhones: @escaping @MainActor @Sendable ([PairedPhone]) -> Void,
@@ -46,6 +48,7 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
         self.snapshot = snapshot
         self.history = history
         self.about = about
+        self.onDiskSettings = onDiskSettings
         self.onPort = onPort
         self.onDiscovery = onDiscovery
         self.onPhones = onPhones
@@ -233,15 +236,29 @@ final class MetricServer: NSObject, NetServiceDelegate, @unchecked Sendable {
             let encrypted = Data(data.dropFirst(prefixLength + 36))
             guard let request = try? SecurePacket.open(encrypted, using: key),
                   let command = String(data: request, encoding: .utf8),
-                  ["snapshot.v1", "history.v1", "about.v1"].contains(command) else {
+                  (["snapshot.v1", "history.v1", "about.v1"].contains(command) ||
+                   command.hasPrefix("disk.settings.v1:")) else {
                 connection.cancel()
                 return
+            }
+            let diskSettings: DiskSamplingSettings?
+            if command.hasPrefix("disk.settings.v1:") {
+                let encoded = String(command.dropFirst("disk.settings.v1:".count))
+                guard let data = Data(base64Encoded: encoded),
+                      let settings = try? JSONDecoder().decode(DiskSamplingSettings.self, from: data),
+                      settings.isValid else { connection.cancel(); return }
+                diskSettings = settings
+            } else {
+                diskSettings = nil
             }
             self.phones.recordActivity(for: phoneID)
             self.publishPhones()
             DispatchQueue.main.async {
                 let payload: Data?
-                if command == "history.v1" {
+                if let diskSettings {
+                    self.onDiskSettings(diskSettings)
+                    payload = Data("ok".utf8)
+                } else if command == "history.v1" {
                     payload = try? JSONEncoder().encode(self.history())
                 } else if command == "about.v1" {
                     payload = try? JSONEncoder().encode(self.about())

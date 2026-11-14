@@ -44,6 +44,13 @@ private struct OverviewView: View {
     @ObservedObject var nearby: NearbyMacStore
     @State private var showSettings = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(DiskDisplayPreference.selectedDiskKey) private var selectedDiskID = ""
+    @AppStorage("Stats.showRemovableDisks") private var showRemovableDisks = false
+    @AppStorage(DiskDisplayPreference.showSpeedKey) private var showDiskSpeed = false
+    @AppStorage(DiskDisplayPreference.showTextKey) private var showDiskText = false
+    @AppStorage(DiskDisplayPreference.speedBaseKey) private var diskSpeedBase = "byte"
+    @AppStorage(DiskDisplayPreference.speedUnitKey) private var diskSpeedUnit = "auto"
+    @AppStorage(DiskDisplayPreference.textTemplateKey) private var diskTextTemplate = "$capacity.free/$capacity.total"
 
     private var displayed: MetricSnapshot {
         nearby.snapshot ?? MetricSnapshot(machineName: nearby.selectedDisplayName ?? "Mac")
@@ -80,9 +87,28 @@ private struct OverviewView: View {
                         MetricDetailView(kind: .storage, store: nearby)
                     } label: {
                         MetricCard(title: "Storage", icon: "internaldrive", tint: .blue,
-                                   value: MetricFormat.bytes(displayed.diskFreeBytes),
-                                   detail: "free of \(MetricFormat.bytes(displayed.diskTotalBytes))",
+                                   value: MetricFormat.bytes(selectedDisk?.freeBytes ?? displayed.diskFreeBytes),
+                                   detail: "free of \(MetricFormat.bytes(selectedDisk?.totalBytes ?? displayed.diskTotalBytes)) · \(selectedDisk?.name ?? "Startup disk")",
                                    fraction: diskUsedFraction(displayed))
+                    }
+                    if showDiskSpeed {
+                        NavigationLink {
+                            MetricDetailView(kind: .storage, store: nearby)
+                        } label: {
+                            MetricCard(title: "Disk I/O", icon: "arrow.left.arrow.right", tint: .blue,
+                                       value: "Read \(DiskDisplayPreference.rate(selectedDisk?.readBytesPerSecond, base: diskSpeedBase, unit: diskSpeedUnit))",
+                                       detail: "Write \(DiskDisplayPreference.rate(selectedDisk?.writeBytesPerSecond, base: diskSpeedBase, unit: diskSpeedUnit)) · \(selectedDisk?.name ?? "Startup disk")",
+                                       fraction: nil)
+                        }
+                    }
+                    if showDiskText {
+                        NavigationLink {
+                            MetricDetailView(kind: .storage, store: nearby)
+                        } label: {
+                            MetricCard(title: "Disk Text", icon: "textformat", tint: .blue,
+                                       value: DiskDisplayPreference.text(diskTextTemplate, volume: selectedDisk),
+                                       detail: selectedDisk?.name ?? "Startup disk", fraction: nil)
+                        }
                     }
                     NavigationLink {
                         MetricDetailView(kind: .network, store: nearby)
@@ -114,13 +140,20 @@ private struct OverviewView: View {
         Array(repeating: GridItem(.flexible(), spacing: 12), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
     }
 
+    private var selectedDisk: DiskVolume? {
+        DiskDisplayPreference.selectedVolume(in: displayed, id: selectedDiskID,
+                                             showRemovable: showRemovableDisks)
+    }
+
     private func fraction(_ used: UInt64?, _ total: UInt64?) -> Double? {
         guard let used, let total, total > 0 else { return nil }
         return Double(used) / Double(total)
     }
 
     private func diskUsedFraction(_ snapshot: MetricSnapshot) -> Double? {
-        guard let free = snapshot.diskFreeBytes, let total = snapshot.diskTotalBytes, total > 0 else { return nil }
+        guard let free = selectedDisk?.freeBytes ?? snapshot.diskFreeBytes,
+              let total = selectedDisk?.totalBytes ?? snapshot.diskTotalBytes,
+              total > 0 else { return nil }
         return 1 - Double(free) / Double(total)
     }
 
@@ -130,21 +163,17 @@ private struct DashboardSettingsView: View {
     @ObservedObject var nearby: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
     @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
+    @AppStorage(DiskDisplayPreference.showSpeedKey) private var showDiskSpeed = false
+    @AppStorage(DiskDisplayPreference.showTextKey) private var showDiskText = false
     @State private var showAbout = false
     @State private var showForgetConfirmation = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Dashboard") {
-                    Picker("Refresh interval", selection: Binding(
-                        get: { nearby.refreshIntervalSeconds },
-                        set: { nearby.setRefreshInterval($0) }
-                    )) {
-                        ForEach(NearbyMacStore.refreshIntervals, id: \.self) { seconds in
-                            Text("\(seconds) seconds").tag(seconds)
-                        }
-                    }
+                Section("System activity") {
+                    Toggle("Disk read and write speeds", isOn: $showDiskSpeed)
+                    Toggle("Disk text", isOn: $showDiskText)
                 }
                 Section("Interaction") {
                     Toggle("Haptics", isOn: $hapticsEnabled)
