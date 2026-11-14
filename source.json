@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.15",
+          "buildVersion": "18",
+          "date": "2026-11-14T12:37:54Z",
+          "localizedDescription": "Stats iPhone 0.3.15 keeps Paired Macs in Mac Connection Settings.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.22/Stats-v0.3.15-iOS.ipa",
+          "size": 2800963,
+          "sha256": "d44cfd7d0c87186e1ca42e12cf89106b8b2f8e24ed391f0c58bbfe3520120276",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.14",
           "buildVersion": "17",
           "date": "2026-11-14T12:35:43Z",
