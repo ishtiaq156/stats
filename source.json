@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.14",
+          "buildVersion": "17",
+          "date": "2026-11-14T12:35:43Z",
+          "localizedDescription": "Stats iPhone 0.3.14 refines activity charts and metric settings.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.21/Stats-v0.3.14-iOS.ipa",
+          "size": 2803090,
+          "sha256": "182bd04ae40697dea7838c69ac2a45a362fd0360e9719f6abc853df2a99f1e1d",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.13",
           "buildVersion": "16",
           "date": "2026-11-14T12:20:11Z",
