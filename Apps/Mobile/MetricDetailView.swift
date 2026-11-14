@@ -3,6 +3,99 @@ import Charts
 import SwiftUI
 import UIKit
 
+private enum ChartHistoryWindow {
+    static let choices = [1, 2, 3, 5, 10]
+
+    static func recent<T>(_ samples: [T], minutes: Int, date: (T) -> Date) -> [T] {
+        guard let end = samples.last.map(date) else { return [] }
+        let start = end.addingTimeInterval(-Double(minutes) * 60)
+        return samples.filter { date($0) >= start }
+    }
+}
+
+private struct ChartHistoryMenu: View {
+    @Binding var minutes: Int
+
+    var body: some View {
+        Menu {
+            Picker("Chart history", selection: $minutes) {
+                ForEach(ChartHistoryWindow.choices, id: \.self) { value in
+                    Text("\(value) minute\(value == 1 ? "" : "s")").tag(value)
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text("\(minutes) min")
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Chart history, \(minutes) minutes")
+    }
+}
+
+/// Keeps inspection behavior consistent between Swift Charts and Canvas plots.
+private struct HistoryScrubPlot<Plot: View>: View {
+    let dates: [Date]
+    let height: CGFloat
+    let value: (Int) -> String
+    @ViewBuilder let plot: () -> Plot
+
+    @State private var selectedDate: Date?
+
+    var body: some View {
+        plot()
+            .frame(height: height)
+            .overlay {
+                GeometryReader { geometry in
+                    if let selectedDate, let selected = dates.firstIndex(of: selectedDate),
+                       let first = dates.first, let last = dates.last {
+                        let span = max(0.001, last.timeIntervalSince(first))
+                        let x = geometry.size.width * dates[selected].timeIntervalSince(first) / span
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.55))
+                            .frame(width: 1, height: geometry.size.height)
+                            .position(x: x, y: geometry.size.height / 2)
+                            .allowsHitTesting(false)
+                        VStack(spacing: 1) {
+                            Text(dates[selected].formatted(date: .omitted, time: .standard))
+                                .foregroundStyle(.secondary)
+                            Text(value(selected))
+                        }
+                            .font(.caption2.weight(.semibold))
+                            .monospacedDigit()
+                            .lineLimit(3)
+                            .multilineTextAlignment(.center)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .frame(maxWidth: min(geometry.size.width - 8, 270))
+                            .position(x: min(max(x, min(100, geometry.size.width / 2)),
+                                             max(geometry.size.width / 2, geometry.size.width - 100)), y: 22)
+                            .allowsHitTesting(false)
+                    }
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0)
+                            .onChanged { gesture in
+                                guard let first = dates.first, let last = dates.last,
+                                      dates.count > 1, geometry.size.width > 0 else { return }
+                                let fraction = min(1, max(0, gesture.location.x / geometry.size.width))
+                                let target = first.addingTimeInterval(last.timeIntervalSince(first) * fraction)
+                                selectedDate = dates.indices.min {
+                                    abs(dates[$0].timeIntervalSince(target)) < abs(dates[$1].timeIntervalSince(target))
+                                }.map { dates[$0] }
+                            })
+                }
+            }
+            .onChange(of: dates) { _, updated in
+                if let selectedDate, !updated.contains(selectedDate) { self.selectedDate = nil }
+            }
+    }
+}
+
 enum MetricKind {
     case cpu, memory, storage, network
 
@@ -267,6 +360,7 @@ private struct CPUCoreGroup: Identifiable {
 /// Compact CPU monitoring designed for the available iPhone width.
 private struct CPUDetailView: View {
     @ObservedObject var store: NearbyMacStore
+    @AppStorage("cpuChartHistoryMinutes") private var chartHistoryMinutes = 3
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
 
@@ -300,10 +394,11 @@ private struct CPUDetailView: View {
     }
 
     private var history: [CPUHistoryPoint] {
-        let samples = store.history.compactMap { sample -> CPUHistoryPoint? in
+        let allSamples = store.history.compactMap { sample -> CPUHistoryPoint? in
             guard let fraction = validFraction(sample.cpuFraction) else { return nil }
             return CPUHistoryPoint(date: sample.timestamp, fraction: fraction)
         }
+        let samples = ChartHistoryWindow.recent(allSamples, minutes: chartHistoryMinutes, date: \.date)
         // Preserve peaks and troughs while keeping long sessions smooth to scroll.
         let bucketSize = max(1, Int(ceil(Double(samples.count) / 160)))
         guard bucketSize > 1 else { return samples }
@@ -341,7 +436,10 @@ private struct CPUDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 gauges
-                sectionTitle("Usage history")
+                HStack(spacing: 8) {
+                    sectionTitle("Usage history")
+                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
+                }
                 historyChart
                 coreActivityStrip
                 sectionTitle("Details")
@@ -432,26 +530,28 @@ private struct CPUDetailView: View {
     private var historyChart: some View {
         let points = history
         if points.count > 1 {
-            Chart(points) { point in
-                AreaMark(x: .value("Time", point.date),
-                         y: .value("CPU percentage", point.fraction * 100))
-                    .interpolationMethod(.linear)
-                    .foregroundStyle(LinearGradient(colors: [userColor.opacity(0.48), userColor.opacity(0.10)],
-                                                    startPoint: .top, endPoint: .bottom))
-                LineMark(x: .value("Time", point.date),
-                         y: .value("CPU percentage", point.fraction * 100))
-                    .interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.6))
-                    .foregroundStyle(userColor)
+            HistoryScrubPlot(dates: points.map(\.date), height: 105,
+                             value: { MetricFormat.percent(points[$0].fraction) }) {
+                Chart(points) { point in
+                    AreaMark(x: .value("Time", point.date),
+                             y: .value("CPU percentage", point.fraction * 100))
+                        .interpolationMethod(.linear)
+                        .foregroundStyle(LinearGradient(colors: [userColor.opacity(0.48), userColor.opacity(0.10)],
+                                                        startPoint: .top, endPoint: .bottom))
+                    LineMark(x: .value("Time", point.date),
+                             y: .value("CPU percentage", point.fraction * 100))
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.6))
+                        .foregroundStyle(userColor)
+                }
+                .chartYScale(domain: 0...100)
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartLegend(.hidden)
+                .chartPlotStyle { plot in
+                    plot.background(userColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+                }
             }
-            .chartYScale(domain: 0...100)
-            .chartXAxis(.hidden)
-            .chartYAxis(.hidden)
-            .chartLegend(.hidden)
-            .chartPlotStyle { plot in
-                plot.background(userColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .frame(height: 105)
             .accessibilityLabel("CPU usage history")
             .accessibilityValue("\(points.count) historical samples")
         } else {
@@ -747,6 +847,7 @@ private struct RAMSlice: Identifiable {
 /// Compact RAM detail view with live pressure, composition and process readings.
 private struct RAMDetailView: View {
     @ObservedObject var store: NearbyMacStore
+    @AppStorage("ramChartHistoryMinutes") private var chartHistoryMinutes = 3
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
 
@@ -800,11 +901,12 @@ private struct RAMDetailView: View {
     }
 
     private var history: [RAMHistoryPoint] {
-        let samples = store.history.compactMap { sample -> RAMHistoryPoint? in
+        let allSamples = store.history.compactMap { sample -> RAMHistoryPoint? in
             guard let used = sample.memoryUsedBytes,
                   let total = sample.memoryTotalBytes, total > 0, used <= total else { return nil }
             return RAMHistoryPoint(date: sample.timestamp, fraction: Double(used) / Double(total))
         }
+        let samples = ChartHistoryWindow.recent(allSamples, minutes: chartHistoryMinutes, date: \.date)
         let bucketSize = max(1, Int(ceil(Double(samples.count) / 160)))
         guard bucketSize > 1 else { return samples }
         var result: [RAMHistoryPoint] = []
@@ -825,7 +927,10 @@ private struct RAMDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 dashboard
-                sectionTitle("Usage history")
+                HStack(spacing: 8) {
+                    sectionTitle("Usage history")
+                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
+                }
                 historyChart
                 sectionTitle("Details")
                 breakdown
@@ -914,26 +1019,28 @@ private struct RAMDetailView: View {
     private var historyChart: some View {
         let points = history
         if points.count > 1 {
-            Chart(points) { point in
-                AreaMark(x: .value("Time", point.date),
-                         y: .value("Memory percentage", point.fraction * 100))
-                    .interpolationMethod(.linear)
-                    .foregroundStyle(LinearGradient(colors: [appColor.opacity(0.48), appColor.opacity(0.10)],
-                                                    startPoint: .top, endPoint: .bottom))
-                LineMark(x: .value("Time", point.date),
-                         y: .value("Memory percentage", point.fraction * 100))
-                    .interpolationMethod(.linear)
-                    .lineStyle(StrokeStyle(lineWidth: 1.6))
-                    .foregroundStyle(appColor)
+            HistoryScrubPlot(dates: points.map(\.date), height: 105,
+                             value: { MetricFormat.percent(points[$0].fraction) }) {
+                Chart(points) { point in
+                    AreaMark(x: .value("Time", point.date),
+                             y: .value("Memory percentage", point.fraction * 100))
+                        .interpolationMethod(.linear)
+                        .foregroundStyle(LinearGradient(colors: [appColor.opacity(0.48), appColor.opacity(0.10)],
+                                                        startPoint: .top, endPoint: .bottom))
+                    LineMark(x: .value("Time", point.date),
+                             y: .value("Memory percentage", point.fraction * 100))
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.6))
+                        .foregroundStyle(appColor)
+                }
+                .chartYScale(domain: 0...100)
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartLegend(.hidden)
+                .chartPlotStyle { plot in
+                    plot.background(appColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+                }
             }
-            .chartYScale(domain: 0...100)
-            .chartXAxis(.hidden)
-            .chartYAxis(.hidden)
-            .chartLegend(.hidden)
-            .chartPlotStyle { plot in
-                plot.background(appColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .frame(height: 105)
             .accessibilityLabel("Memory usage history")
             .accessibilityValue("\(points.count) samples, latest \(MetricFormat.percent(points.last?.fraction))")
         } else {
@@ -1218,6 +1325,7 @@ private struct DiskDetailView: View {
     @AppStorage(DiskDisplayPreference.readColorKey) private var readColorHex = "0F8FFA"
     @AppStorage(DiskDisplayPreference.writeColorKey) private var writeColorHex = "F74F5C"
     @AppStorage(DiskDisplayPreference.reverseChartOrderKey) private var reverseChartOrder = false
+    @AppStorage("diskChartHistoryMinutes") private var chartHistoryMinutes = 3
     @AppStorage(DiskDisplayPreference.hiddenCardsKey) private var hiddenCards = Data()
     @AppStorage(DiskDisplayPreference.collapsedCardsKey) private var collapsedCards = Data()
     @AppStorage(NearbyMacStore.diskUpdateIntervalKey) private var diskUpdateInterval = 10
@@ -1260,6 +1368,18 @@ private struct DiskDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 4)
+
+                HStack {
+                    Text("Activity history").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
+                }
+                .padding(.horizontal, 4)
+                Text("Read and write use independent chart scales")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
 
                 if !visibleVolumes.isEmpty {
                     ForEach(visibleVolumes, id: \.id) { volume in
@@ -1360,6 +1480,11 @@ private struct DiskDetailView: View {
                         }
                     }
                     Section("Activity chart") {
+                        Picker("Chart history", selection: $chartHistoryMinutes) {
+                            ForEach(ChartHistoryWindow.choices, id: \.self) { value in
+                                Text("\(value) minute\(value == 1 ? "" : "s")").tag(value)
+                            }
+                        }
                         ColorPicker("Read color", selection: colorBinding(for: DiskDisplayPreference.readColorKey), supportsOpacity: false)
                         ColorPicker("Write color", selection: colorBinding(for: DiskDisplayPreference.writeColorKey), supportsOpacity: false)
                         HapticToggle(title: "Reverse read and write order", isOn: $reverseChartOrder)
@@ -1489,7 +1614,8 @@ private struct DiskDetailView: View {
         var byTime: [Date: DiskIOPoint] = [:]
         for point in remote { byTime[point.timestamp] = point }
         for point in local { byTime[point.timestamp] = point }
-        let samples = byTime.values.sorted { $0.timestamp < $1.timestamp }
+        let samples = ChartHistoryWindow.recent(byTime.values.sorted { $0.timestamp < $1.timestamp },
+                                                minutes: chartHistoryMinutes, date: \.timestamp)
         guard samples.count > 180 else { return samples }
         // Keep the first/last and each direction's own peak in every bucket.
         // A large read burst must never cause a smaller write peak to vanish.
@@ -1885,9 +2011,13 @@ private struct DiskVolumeCard: View {
     @ViewBuilder
     private var activityChart: some View {
         if history.count >= 2 {
-            DiskActivityPlot(history: history, readColor: readColor, writeColor: writeColor,
-                             reverseChartOrder: reverseChartOrder)
-            .frame(height: 95)
+            HistoryScrubPlot(dates: history.map(\.timestamp), height: 95, value: { index in
+                let point = history[index]
+                return "Read \(diskRate(point.readBytesPerSecond, base: speedBase, unit: speedUnit)) · Write \(diskRate(point.writeBytesPerSecond, base: speedBase, unit: speedUnit))"
+            }) {
+                DiskActivityPlot(history: history, readColor: readColor, writeColor: writeColor,
+                                 reverseChartOrder: reverseChartOrder)
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(name) read and write activity history")
             .accessibilityValue("\(history.count) samples; read \(reverseChartOrder ? "above" : "below") center, write \(reverseChartOrder ? "below" : "above") center, independently scaled. Last read \(diskRate(readRate, base: speedBase, unit: speedUnit)), write \(diskRate(writeRate, base: speedBase, unit: speedUnit))")
@@ -2000,6 +2130,7 @@ private struct NetworkConnectivityPoint: Identifiable {
 /// Compact interface activity and network settings, keeping all values tied to Mac readings.
 private struct NetworkDetailView: View {
     @ObservedObject var store: NearbyMacStore
+    @AppStorage("networkChartHistoryMinutes") private var chartHistoryMinutes = 3
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var localSamples: [NetworkRatePoint] = []
@@ -2033,7 +2164,8 @@ private struct NetworkDetailView: View {
         var merged: [Date: NetworkRatePoint] = [:]
         for sample in remote { merged[sample.timestamp] = sample }
         for sample in localSamples { merged[sample.timestamp] = sample }
-        let ordered = merged.values.sorted { $0.timestamp < $1.timestamp }
+        let ordered = ChartHistoryWindow.recent(merged.values.sorted { $0.timestamp < $1.timestamp },
+                                                minutes: chartHistoryMinutes, date: \.timestamp)
         guard ordered.count > 240 else { return ordered }
         let bucketSize = Int(ceil(Double(ordered.count) / 100))
         var result: [NetworkRatePoint] = []
@@ -2139,11 +2271,18 @@ private struct NetworkDetailView: View {
             }
             .padding(.vertical, 4)
 
-            sectionTitle("Usage history")
+            HStack(spacing: 8) {
+                sectionTitle("Usage history")
+                ChartHistoryMenu(minutes: $chartHistoryMinutes)
+            }
             if history.count >= 2 {
-                NetworkActivityPlot(samples: history, downloadColor: downloadColor,
-                                    uploadColor: uploadColor)
-                    .frame(height: 130)
+                HistoryScrubPlot(dates: history.map(\.timestamp), height: 130, value: { index in
+                    let point = history[index]
+                    return "Download \(networkRate(point.received)) · Upload \(networkRate(point.sent))"
+                }) {
+                    NetworkActivityPlot(samples: history, downloadColor: downloadColor,
+                                        uploadColor: uploadColor)
+                }
                     .background(downloadColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Network throughput history")
@@ -2166,7 +2305,7 @@ private struct NetworkDetailView: View {
                 legend("Download", color: downloadColor)
                 legend("Upload", color: uploadColor)
                 Spacer(minLength: 0)
-                Text("Bytes/s")
+                Text("Independent scales · B/s")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
