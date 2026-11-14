@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.12",
+          "buildVersion": "15",
+          "date": "2026-11-14T09:58:36Z",
+          "localizedDescription": "Stats iPhone 0.3.12 and Stats Companion 0.3.13 add phone-initiated pairing revocation.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.19/Stats-v0.3.12-iOS.ipa",
+          "size": 2783102,
+          "sha256": "27858011ddd9b984e5bf3e15639520787573ed04170c9855438a41ecdb44d4c3",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.11",
           "buildVersion": "14",
           "date": "2026-11-14T05:39:14Z",
