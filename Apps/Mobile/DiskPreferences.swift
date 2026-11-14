@@ -9,6 +9,19 @@ enum DiskDisplayPreference {
     static let speedBaseKey = "Stats.diskSpeedBase"
     static let speedUnitKey = "Stats.diskSpeedUnit"
     static let textTemplateKey = "Stats.diskTextTemplate"
+    static let readColorKey = "Stats.diskReadColor"
+    static let writeColorKey = "Stats.diskWriteColor"
+    static let reverseChartOrderKey = "Stats.diskReverseChartOrder"
+    static let hiddenCardsKey = "Stats.diskHiddenCards"
+    static let collapsedCardsKey = "Stats.diskCollapsedCards"
+
+    static func cardIDs(in data: Data) -> Set<String> {
+        (try? JSONDecoder().decode(Set<String>.self, from: data)) ?? []
+    }
+
+    static func cardIDs(_ ids: Set<String>) -> Data {
+        (try? JSONEncoder().encode(ids)) ?? Data()
+    }
 
     static func selectedVolume(in snapshot: MetricSnapshot, id: String,
                                showRemovable: Bool = false) -> DiskVolume? {

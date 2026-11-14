@@ -1,6 +1,7 @@
 import ActivityCore
 import Charts
 import SwiftUI
+import UIKit
 
 enum MetricKind {
     case cpu, memory, storage, network
@@ -1214,6 +1215,11 @@ private struct DiskDetailView: View {
     @AppStorage(DiskDisplayPreference.speedBaseKey) private var speedBase = "byte"
     @AppStorage(DiskDisplayPreference.speedUnitKey) private var speedUnit = "auto"
     @AppStorage(DiskDisplayPreference.textTemplateKey) private var textTemplate = "$capacity.free/$capacity.total"
+    @AppStorage(DiskDisplayPreference.readColorKey) private var readColorHex = "0F8FFA"
+    @AppStorage(DiskDisplayPreference.writeColorKey) private var writeColorHex = "F74F5C"
+    @AppStorage(DiskDisplayPreference.reverseChartOrderKey) private var reverseChartOrder = false
+    @AppStorage(DiskDisplayPreference.hiddenCardsKey) private var hiddenCards = Data()
+    @AppStorage(DiskDisplayPreference.collapsedCardsKey) private var collapsedCards = Data()
     @AppStorage(NearbyMacStore.diskUpdateIntervalKey) private var diskUpdateInterval = 10
     @AppStorage(NearbyMacStore.diskSMARTKey) private var smartEnabled = true
     @AppStorage(NearbyMacStore.diskSMARTIntervalKey) private var smartInterval = 30
@@ -1221,14 +1227,18 @@ private struct DiskDetailView: View {
     @State private var capturedHistory: [String: [DiskIOPoint]] = [:]
     @State private var showingSettings = false
 
-    private let readColor = Color(red: 0.06, green: 0.56, blue: 0.98)
-    private let writeColor = Color(red: 0.97, green: 0.31, blue: 0.36)
+    private var readColor: Color { diskColor(readColorHex, fallback: Color(red: 0.06, green: 0.56, blue: 0.98)) }
+    private var writeColor: Color { diskColor(writeColorHex, fallback: Color(red: 0.97, green: 0.31, blue: 0.36)) }
 
     private var panelColor: Color {
         colorScheme == .dark ? Color(white: 0.25) : Color(uiColor: .secondarySystemGroupedBackground)
     }
     private var volumes: [DiskVolume] {
         (store.snapshot?.diskDetails?.volumes ?? []).filter { showRemovableDisks || $0.isRemovable != true }
+    }
+    private var visibleVolumes: [DiskVolume] {
+        let hidden = DiskDisplayPreference.cardIDs(in: hiddenCards)
+        return volumes.filter { !hidden.contains($0.id) }
     }
 
     var body: some View {
@@ -1251,14 +1261,22 @@ private struct DiskDetailView: View {
                 }
                 .padding(.horizontal, 4)
 
-                if !volumes.isEmpty {
-                    ForEach(volumes, id: \.id) { volume in
+                if !visibleVolumes.isEmpty {
+                    ForEach(visibleVolumes, id: \.id) { volume in
                         DiskVolumeCard(volume: volume,
                                        history: history(for: volume.id),
                                        background: panelColor,
                                        readColor: readColor, speedBase: speedBase, speedUnit: speedUnit,
-                                       writeColor: writeColor)
+                                       writeColor: writeColor,
+                                       reverseChartOrder: reverseChartOrder,
+                                       detailsExpanded: expandedBinding(for: volume.id))
                     }
+                } else if !volumes.isEmpty {
+                    ContentUnavailableView("No drive cards shown", systemImage: "internaldrive",
+                                           description: Text("Show a drive in Disk Settings to see its card."))
+                        .frame(maxWidth: .infinity)
+                        .padding(15)
+                        .background(panelColor, in: RoundedRectangle(cornerRadius: 18))
                 } else if let snapshot = store.snapshot,
                           snapshot.diskTotalBytes != nil || snapshot.diskFreeBytes != nil {
                     DiskVolumeCard(volume: nil,
@@ -1266,7 +1284,9 @@ private struct DiskDetailView: View {
                                    legacyFree: snapshot.diskFreeBytes,
                                    history: [], background: panelColor,
                                    readColor: readColor, speedBase: speedBase,
-                                   speedUnit: speedUnit, writeColor: writeColor)
+                                   speedUnit: speedUnit, writeColor: writeColor,
+                                   reverseChartOrder: reverseChartOrder,
+                                   detailsExpanded: expandedBinding(for: "legacy-startup"))
                 } else {
                     ContentUnavailableView(
                         "Waiting for disk readings",
@@ -1327,6 +1347,22 @@ private struct DiskDetailView: View {
                         Text("Volumes")
                     } footer: {
                         Text("Removable disks include mounted disk images and removable drives. The selected disk is used on the dashboard.")
+                    }
+                    if !volumes.isEmpty {
+                        Section {
+                            ForEach(volumes) { volume in
+                                HapticToggle(title: volume.name, isOn: visibleBinding(for: volume.id))
+                            }
+                        } header: {
+                            Text("Drive cards")
+                        } footer: {
+                            Text("Choose which drives appear on this Disk screen. This does not change the dashboard disk.")
+                        }
+                    }
+                    Section("Activity chart") {
+                        ColorPicker("Read color", selection: colorBinding(for: DiskDisplayPreference.readColorKey), supportsOpacity: false)
+                        ColorPicker("Write color", selection: colorBinding(for: DiskDisplayPreference.writeColorKey), supportsOpacity: false)
+                        HapticToggle(title: "Reverse read and write order", isOn: $reverseChartOrder)
                     }
                     if showDiskSpeed {
                         Section("Disk read and write speeds") {
@@ -1403,6 +1439,39 @@ private struct DiskDetailView: View {
             capturedHistory.removeAll()
             selectedDiskID = ""
         }
+    }
+
+    private func visibleBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { !DiskDisplayPreference.cardIDs(in: hiddenCards).contains(id) },
+            set: { visible in
+                var ids = DiskDisplayPreference.cardIDs(in: hiddenCards)
+                if visible { ids.remove(id) } else { ids.insert(id) }
+                hiddenCards = DiskDisplayPreference.cardIDs(ids)
+            }
+        )
+    }
+
+    private func expandedBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { !DiskDisplayPreference.cardIDs(in: collapsedCards).contains(id) },
+            set: { expanded in
+                var ids = DiskDisplayPreference.cardIDs(in: collapsedCards)
+                if expanded { ids.remove(id) } else { ids.insert(id) }
+                collapsedCards = DiskDisplayPreference.cardIDs(ids)
+            }
+        )
+    }
+
+    private func colorBinding(for key: String) -> Binding<Color> {
+        Binding(
+            get: { key == DiskDisplayPreference.readColorKey ? readColor : writeColor },
+            set: { color in
+                guard let hex = diskColorHex(color) else { return }
+                if key == DiskDisplayPreference.readColorKey { readColorHex = hex }
+                else { writeColorHex = hex }
+            }
+        )
     }
 
     private func history(for volumeID: String) -> [DiskIOPoint] {
@@ -1567,6 +1636,23 @@ private func diskRateValue(_ bytesPerSecond: Double?) -> Double {
     return bytesPerSecond
 }
 
+private func diskColor(_ hex: String, fallback: Color) -> Color {
+    guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return fallback }
+    return Color(.sRGB, red: Double((value >> 16) & 0xFF) / 255,
+                 green: Double((value >> 8) & 0xFF) / 255,
+                 blue: Double(value & 0xFF) / 255, opacity: 1)
+}
+
+private func diskColorHex(_ color: Color) -> String? {
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    guard UIColor(color).getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+    func component(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
+    return String(format: "%02X%02X%02X", component(red), component(green), component(blue))
+}
+
 /// The read and write traces use independent visual scales. A large read spike
 /// must not flatten a smaller, genuinely measured write trace (or vice versa).
 /// The chart has no numeric Y axis; the adjacent values remain actual B/s.
@@ -1582,6 +1668,7 @@ private struct DiskActivityPlot: View {
     let history: [DiskIOPoint]
     let readColor: Color
     let writeColor: Color
+    let reverseChartOrder: Bool
 
     var body: some View {
         let readScale = diskChartScale(history.compactMap(\.readBytesPerSecond))
@@ -1594,14 +1681,15 @@ private struct DiskActivityPlot: View {
             let beginning = first.timestamp.timeIntervalSinceReferenceDate
             let duration = max(1, last.timestamp.timeIntervalSinceReferenceDate - beginning)
 
-            // Read activity is blue below the baseline; write activity is red above.
-            // Each has its own scale so one busy direction cannot hide the other.
+            // Each direction has its own scale so one busy direction cannot hide the other.
             drawSeries(in: context, size: size, middle: middle,
                        beginning: beginning, duration: duration,
-                       scale: readScale, isWrite: false, color: readColor)
+                       scale: readScale, isWrite: false,
+                       isAbove: reverseChartOrder, color: readColor)
             drawSeries(in: context, size: size, middle: middle,
                        beginning: beginning, duration: duration,
-                       scale: writeScale, isWrite: true, color: writeColor)
+                       scale: writeScale, isWrite: true,
+                       isAbove: !reverseChartOrder, color: writeColor)
 
             var baseline = Path()
             baseline.move(to: CGPoint(x: 0, y: middle))
@@ -1615,7 +1703,7 @@ private struct DiskActivityPlot: View {
     private func drawSeries(in context: GraphicsContext, size: CGSize,
                             middle: CGFloat, beginning: TimeInterval,
                             duration: TimeInterval, scale: Double,
-                            isWrite: Bool, color: Color) {
+                            isWrite: Bool, isAbove: Bool, color: Color) {
         var points: [CGPoint] = []
         let halfHeight = max(0, middle - 2)
 
@@ -1645,7 +1733,7 @@ private struct DiskActivityPlot: View {
             let x = CGFloat((sample.timestamp.timeIntervalSinceReferenceDate - beginning) / duration)
                 * size.width
             let amplitude = CGFloat(min(1, rate / scale)) * halfHeight
-            points.append(CGPoint(x: x, y: middle + (isWrite ? -amplitude : amplitude)))
+            points.append(CGPoint(x: x, y: middle + (isAbove ? -amplitude : amplitude)))
         }
         drawSegment()
     }
@@ -1661,8 +1749,11 @@ private struct DiskVolumeCard: View {
     let speedBase: String
     let speedUnit: String
     let writeColor: Color
+    let reverseChartOrder: Bool
+    @Binding var detailsExpanded: Bool
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsUsedCapacity = false
 
     private var name: String { volume?.name.isEmpty == false ? (volume?.name ?? "") : "Startup volume" }
     private var total: UInt64? { volume?.totalBytes ?? legacyTotal }
@@ -1673,16 +1764,36 @@ private struct DiskVolumeCard: View {
     }
     private var readRate: Double? { volume?.readBytesPerSecond }
     private var writeRate: Double? { volume?.writeBytesPerSecond }
+    private var shownCapacity: UInt64? {
+        guard showsUsedCapacity, let total, let free, free <= total else { return free }
+        return total - free
+    }
+    private var shownFraction: Double? {
+        guard let usedFraction else { return nil }
+        return showsUsedCapacity ? usedFraction : 1 - usedFraction
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 9) {
-                Text(name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 4)
+            Button {
+                withAnimation(.snappy(duration: 0.25)) { detailsExpanded.toggle() }
+            } label: {
+                HStack(alignment: .center, spacing: 9) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(detailsExpanded ? 0 : -90))
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(name) details")
+            .accessibilityValue(detailsExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Double tap to \(detailsExpanded ? "collapse" : "expand")")
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 10) {
@@ -1705,36 +1816,47 @@ private struct DiskVolumeCard: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.18))
-                    if let usedFraction {
+                    if let shownFraction {
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.blue.gradient)
-                            .frame(width: proxy.size.width * usedFraction)
+                            .fill((showsUsedCapacity ? Color.blue : Color.green).gradient)
+                            .frame(width: proxy.size.width * shownFraction)
                     }
                 }
             }
             .frame(height: 9)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Disk capacity used")
-            .accessibilityValue(usedFraction.map { MetricFormat.percent($0) } ?? "Unavailable")
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(MetricFormat.bytes(free)) of \(MetricFormat.bytes(total)) free")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 1)
-                Text(usedFraction.map { MetricFormat.percent(1 - $0) } ?? "—")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            .accessibilityLabel("Disk capacity \(showsUsedCapacity ? "used" : "free")")
+            .accessibilityValue(shownFraction.map { MetricFormat.percent($0) } ?? "Unavailable")
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showsUsedCapacity.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(MetricFormat.bytes(shownCapacity)) of \(MetricFormat.bytes(total)) \(showsUsedCapacity ? "used" : "free")")
+                        .font(.caption)
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 9, weight: .semibold))
+                    Spacer(minLength: 1)
+                    Text(shownFraction.map { MetricFormat.percent($0) } ?? "—")
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
             }
-            .accessibilityElement(children: .combine)
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(name) capacity: \(showsUsedCapacity ? "used" : "free")")
+            .accessibilityValue("\(MetricFormat.bytes(shownCapacity)) of \(MetricFormat.bytes(total)), \(shownFraction.map { MetricFormat.percent($0) } ?? "unavailable")")
+            .accessibilityHint("Double tap to show \(showsUsedCapacity ? "free" : "used") space")
 
-            VStack(spacing: 9) {
-                detailRow("Total read", MetricFormat.bytes(volume?.totalReadBytes))
-                detailRow("Total written", MetricFormat.bytes(volume?.totalWrittenBytes))
-                detailRow("File system", volume?.fileSystem.map { $0.uppercased() } ?? "Unavailable")
-                detailRow("Connection type", text(volume?.connectionType))
+            if detailsExpanded {
+                VStack(spacing: 9) {
+                    detailRow("Total read", MetricFormat.bytes(volume?.totalReadBytes))
+                    detailRow("Total written", MetricFormat.bytes(volume?.totalWrittenBytes))
+                    detailRow("File system", volume?.fileSystem.map { $0.uppercased() } ?? "Unavailable")
+                    detailRow("Connection type", text(volume?.connectionType))
+                }
+                if let smart = volume?.smart { smartDetails(smart) }
             }
-            if let smart = volume?.smart { smartDetails(smart) }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1763,11 +1885,12 @@ private struct DiskVolumeCard: View {
     @ViewBuilder
     private var activityChart: some View {
         if history.count >= 2 {
-            DiskActivityPlot(history: history, readColor: readColor, writeColor: writeColor)
+            DiskActivityPlot(history: history, readColor: readColor, writeColor: writeColor,
+                             reverseChartOrder: reverseChartOrder)
             .frame(height: 95)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(name) read and write activity history")
-            .accessibilityValue("\(history.count) samples; blue reads below center and red writes above center, independently scaled. Last read \(diskRate(readRate, base: speedBase, unit: speedUnit)), write \(diskRate(writeRate, base: speedBase, unit: speedUnit))")
+            .accessibilityValue("\(history.count) samples; read \(reverseChartOrder ? "above" : "below") center, write \(reverseChartOrder ? "below" : "above") center, independently scaled. Last read \(diskRate(readRate, base: speedBase, unit: speedUnit)), write \(diskRate(writeRate, base: speedBase, unit: speedUnit))")
         } else {
             VStack(spacing: 5) {
                 Image(systemName: "chart.xyaxis.line")
