@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.13",
+          "buildVersion": "16",
+          "date": "2026-11-14T12:20:11Z",
+          "localizedDescription": "Stats iPhone 0.3.13 adds interactive activity charts.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.20/Stats-v0.3.13-iOS.ipa",
+          "size": 2816351,
+          "sha256": "9a264f83412a4124f7c83d15be878ea359dcd940d51333e73ce1eca811c002b8",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.12",
           "buildVersion": "15",
           "date": "2026-11-14T09:58:36Z",
