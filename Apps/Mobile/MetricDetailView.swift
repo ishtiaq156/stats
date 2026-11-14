@@ -13,25 +13,22 @@ private enum ChartHistoryWindow {
     }
 }
 
-private struct ChartHistoryMenu: View {
+private struct ChartHistorySettingsView: View {
+    let metric: String
     @Binding var minutes: Int
 
     var body: some View {
-        Menu {
-            Picker("Chart history", selection: $minutes) {
-                ForEach(ChartHistoryWindow.choices, id: \.self) { value in
-                    Text("\(value) minute\(value == 1 ? "" : "s")").tag(value)
+        Form {
+            Section("Activity chart") {
+                Picker("Chart history", selection: $minutes) {
+                    ForEach(ChartHistoryWindow.choices, id: \.self) { value in
+                        Text("\(value) minute\(value == 1 ? "" : "s")").tag(value)
+                    }
                 }
             }
-        } label: {
-            HStack(spacing: 3) {
-                Text("\(minutes) min")
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-            }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
         }
-        .accessibilityLabel("Chart history, \(minutes) minutes")
+        .navigationTitle("\(metric) Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -87,9 +84,11 @@ private struct HistoryScrubPlot<Plot: View>: View {
                                 selectedDate = dates.indices.min {
                                     abs(dates[$0].timeIntervalSince(target)) < abs(dates[$1].timeIntervalSince(target))
                                 }.map { dates[$0] }
-                            })
+                            }
+                            .onEnded { _ in selectedDate = nil })
                 }
             }
+            .onDisappear { selectedDate = nil }
             .onChange(of: dates) { _, updated in
                 if let selectedDate, !updated.contains(selectedDate) { self.selectedDate = nil }
             }
@@ -436,10 +435,7 @@ private struct CPUDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 gauges
-                HStack(spacing: 8) {
-                    sectionTitle("Usage history")
-                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
-                }
+                sectionTitle("Usage history")
                 historyChart
                 coreActivityStrip
                 sectionTitle("Details")
@@ -463,25 +459,18 @@ private struct CPUDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("CPU")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            NavigationLink {
+                ChartHistorySettingsView(metric: "CPU", minutes: $chartHistoryMinutes)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("CPU settings")
+        }
     }
 
     private var gauges: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: "cpu")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(store.selectedDisplayName ?? "Mac")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Circle()
-                    .fill(store.selectedReachable ? Color.green : Color.secondary)
-                    .frame(width: 7, height: 7)
-                Text(store.selectedReachable ? "Connected" : "Offline")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             HStack(alignment: .top, spacing: 8) {
                 VStack(spacing: 5) {
                     CPURingGauge(value: usageFraction, user: validFraction(details?.userFraction),
@@ -927,10 +916,7 @@ private struct RAMDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 dashboard
-                HStack(spacing: 8) {
-                    sectionTitle("Usage history")
-                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
-                }
+                sectionTitle("Usage history")
                 historyChart
                 sectionTitle("Details")
                 breakdown
@@ -949,27 +935,18 @@ private struct RAMDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("RAM")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            NavigationLink {
+                ChartHistorySettingsView(metric: "RAM", minutes: $chartHistoryMinutes)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("RAM settings")
+        }
     }
 
     private var dashboard: some View {
         VStack(spacing: 11) {
-            HStack(spacing: 7) {
-                Image(systemName: "memorychip")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(store.selectedDisplayName ?? "Mac")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Circle()
-                    .fill(store.selectedReachable ? Color.green : Color.secondary)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-                Text(store.selectedReachable ? "Connected" : "Offline")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             HStack(alignment: .top, spacing: 8) {
                 VStack(spacing: 4) {
                     RAMPressureGauge(status: pressure)
@@ -1352,29 +1329,6 @@ private struct DiskDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 13) {
-                HStack(spacing: 8) {
-                    Image(systemName: "internaldrive")
-                        .foregroundStyle(.secondary)
-                    Text(store.selectedDisplayName ?? "Mac")
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Circle()
-                        .fill(store.selectedReachable ? Color.green : Color.secondary)
-                        .frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                    Text(store.selectedReachable ? "Connected" : "Offline")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 4)
-
-                HStack {
-                    Text("Activity history").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    ChartHistoryMenu(minutes: $chartHistoryMinutes)
-                }
-                .padding(.horizontal, 4)
                 Text("Read and write use independent chart scales")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1436,8 +1390,7 @@ private struct DiskDetailView: View {
             }
             .accessibilityLabel("Disk settings")
         }
-        .sheet(isPresented: $showingSettings) {
-            NavigationStack {
+        .navigationDestination(isPresented: $showingSettings) {
                 Form {
                     Section {
                         Picker("Update interval", selection: $diskUpdateInterval) {
@@ -1536,13 +1489,6 @@ private struct DiskDetailView: View {
                 }
                 .navigationTitle("Disk Settings")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showingSettings = false }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
         }
         .onChange(of: diskUpdateInterval) { _, interval in
             if smartInterval < interval { smartInterval = interval }
@@ -2188,7 +2134,6 @@ private struct NetworkDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 13) {
-                macHeader
                 VStack(alignment: .leading, spacing: 14) {
                     ratesCard
                     trafficCard
@@ -2208,33 +2153,20 @@ private struct NetworkDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Network")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            NavigationLink {
+                ChartHistorySettingsView(metric: "Network", minutes: $chartHistoryMinutes)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Network settings")
+        }
         .onAppear { capture(snapshot) }
         .onChange(of: store.snapshot) { _, value in capture(value) }
         .onChange(of: store.selectedName) { _, _ in
             localSamples.removeAll()
             connectivitySamples.removeAll()
         }
-    }
-
-    private var macHeader: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "network")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(store.selectedDisplayName ?? "Mac")
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Circle()
-                .fill(store.selectedReachable ? Color.green : Color.secondary)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
-            Text(store.selectedReachable ? "Connected" : "Offline")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .accessibilityElement(children: .combine)
     }
 
     private var ratesCard: some View {
@@ -2271,10 +2203,7 @@ private struct NetworkDetailView: View {
             }
             .padding(.vertical, 4)
 
-            HStack(spacing: 8) {
-                sectionTitle("Usage history")
-                ChartHistoryMenu(minutes: $chartHistoryMinutes)
-            }
+            sectionTitle("Usage history")
             if history.count >= 2 {
                 HistoryScrubPlot(dates: history.map(\.timestamp), height: 130, value: { index in
                     let point = history[index]
