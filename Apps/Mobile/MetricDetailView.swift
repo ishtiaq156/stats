@@ -1322,7 +1322,7 @@ private struct DiskDetailView: View {
                                 Text(volume.name).tag(volume.id)
                             }
                         }
-                        Toggle("Show removable disks", isOn: $showRemovableDisks)
+                        HapticToggle(title: "Show removable disks", isOn: $showRemovableDisks)
                     } header: {
                         Text("Volumes")
                     } footer: {
@@ -1344,14 +1344,14 @@ private struct DiskDetailView: View {
                         }
                     }
                     Section {
-                        Toggle("SMART", isOn: $smartEnabled)
+                        HapticToggle(title: "SMART", isOn: $smartEnabled)
                         if smartEnabled {
                             Picker("Update interval", selection: $smartInterval) {
                                 ForEach(DiskSamplingSettings.intervals.filter { $0 >= diskUpdateInterval }, id: \.self) { seconds in
                                     Text("\(seconds) seconds").tag(seconds)
                                 }
                             }
-                            Toggle("ATA SMART", isOn: $ataSMARTEnabled)
+                            HapticToggle(title: "ATA SMART", isOn: $ataSMARTEnabled)
                         }
                     } header: {
                         Text("SMART")

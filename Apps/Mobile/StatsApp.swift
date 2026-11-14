@@ -86,29 +86,10 @@ private struct OverviewView: View {
                     NavigationLink {
                         MetricDetailView(kind: .storage, store: nearby)
                     } label: {
-                        MetricCard(title: "Storage", icon: "internaldrive", tint: .blue,
-                                   value: MetricFormat.bytes(selectedDisk?.freeBytes ?? displayed.diskFreeBytes),
-                                   detail: "free of \(MetricFormat.bytes(selectedDisk?.totalBytes ?? displayed.diskTotalBytes)) · \(selectedDisk?.name ?? "Startup disk")",
-                                   fraction: diskUsedFraction(displayed))
-                    }
-                    if showDiskSpeed {
-                        NavigationLink {
-                            MetricDetailView(kind: .storage, store: nearby)
-                        } label: {
-                            MetricCard(title: "Disk I/O", icon: "arrow.left.arrow.right", tint: .blue,
-                                       value: "Read \(DiskDisplayPreference.rate(selectedDisk?.readBytesPerSecond, base: diskSpeedBase, unit: diskSpeedUnit))",
-                                       detail: "Write \(DiskDisplayPreference.rate(selectedDisk?.writeBytesPerSecond, base: diskSpeedBase, unit: diskSpeedUnit)) · \(selectedDisk?.name ?? "Startup disk")",
-                                       fraction: nil)
-                        }
-                    }
-                    if showDiskText {
-                        NavigationLink {
-                            MetricDetailView(kind: .storage, store: nearby)
-                        } label: {
-                            MetricCard(title: "Disk Text", icon: "textformat", tint: .blue,
-                                       value: DiskDisplayPreference.text(diskTextTemplate, volume: selectedDisk),
-                                       detail: selectedDisk?.name ?? "Startup disk", fraction: nil)
-                        }
+                        StorageCard(snapshot: displayed, volume: selectedDisk,
+                                    showSpeed: showDiskSpeed, speedBase: diskSpeedBase,
+                                    speedUnit: diskSpeedUnit, showText: showDiskText,
+                                    textTemplate: diskTextTemplate)
                     }
                     NavigationLink {
                         MetricDetailView(kind: .network, store: nearby)
@@ -149,14 +130,6 @@ private struct OverviewView: View {
         guard let used, let total, total > 0 else { return nil }
         return Double(used) / Double(total)
     }
-
-    private func diskUsedFraction(_ snapshot: MetricSnapshot) -> Double? {
-        guard let free = selectedDisk?.freeBytes ?? snapshot.diskFreeBytes,
-              let total = selectedDisk?.totalBytes ?? snapshot.diskTotalBytes,
-              total > 0 else { return nil }
-        return 1 - Double(free) / Double(total)
-    }
-
 }
 
 private struct DashboardSettingsView: View {
@@ -172,11 +145,11 @@ private struct DashboardSettingsView: View {
         NavigationStack {
             Form {
                 Section("System activity") {
-                    Toggle("Disk read and write speeds", isOn: $showDiskSpeed)
-                    Toggle("Disk text", isOn: $showDiskText)
+                    HapticToggle(title: "Disk read and write speeds", isOn: $showDiskSpeed)
+                    HapticToggle(title: "Disk text", isOn: $showDiskText)
                 }
                 Section("Interaction") {
-                    Toggle("Haptics", isOn: $hapticsEnabled)
+                    HapticToggle(title: "Haptics", isOn: $hapticsEnabled, controlsHaptics: true)
                 }
                 Section {
                     Button("About This Mac") { showAbout = true }
@@ -453,7 +426,7 @@ struct PairingView: View {
                 footer: { Text("If your Mac isn't discovered, enter the local address and port shown in Stats Companion.") }
 
                 Section("Preferences") {
-                    Toggle("Haptics", isOn: $hapticsEnabled)
+                    HapticToggle(title: "Haptics", isOn: $hapticsEnabled, controlsHaptics: true)
                 }
 
                 if store.selectedName != nil {
@@ -544,6 +517,113 @@ private struct MetricCard: View {
         .statsCardBackground()
         .accessibilityElement(children: .combine)
         .accessibilityHint("Show \(title.lowercased()) details")
+    }
+}
+
+private struct StorageCard: View {
+    let snapshot: MetricSnapshot
+    let volume: DiskVolume?
+    let showSpeed: Bool
+    let speedBase: String
+    let speedUnit: String
+    let showText: Bool
+    let textTemplate: String
+
+    private var free: UInt64? { volume?.freeBytes ?? snapshot.diskFreeBytes }
+    private var total: UInt64? { volume?.totalBytes ?? snapshot.diskTotalBytes }
+    private var usedFraction: Double? {
+        guard let free, let total, total > 0 else { return nil }
+        return min(1, max(0, 1 - Double(free) / Double(total)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                Image(systemName: "internaldrive")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.blue)
+                    .frame(width: 34, height: 34)
+                    .background(Color.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Storage").font(.subheadline.weight(.semibold))
+                    Text(volume?.name ?? "Startup disk")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(MetricFormat.bytes(free))
+                    .font(.system(.title, design: .rounded, weight: .semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("free of \(MetricFormat.bytes(total))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+
+            if let usedFraction {
+                GeometryReader { proxy in
+                    Capsule().fill(Color.blue.opacity(0.13))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(Color.blue)
+                                .frame(width: proxy.size.width * usedFraction)
+                        }
+                }
+                .frame(height: 5)
+                .accessibilityLabel("\(MetricFormat.percent(usedFraction)) used")
+            }
+
+            if showSpeed {
+                Divider()
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 18) {
+                        speedLabel("Read", symbol: "arrow.down", value: volume?.readBytesPerSecond)
+                        speedLabel("Write", symbol: "arrow.up", value: volume?.writeBytesPerSecond)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        speedLabel("Read", symbol: "arrow.down", value: volume?.readBytesPerSecond)
+                        speedLabel("Write", symbol: "arrow.up", value: volume?.writeBytesPerSecond)
+                    }
+                }
+            }
+
+            if showText {
+                Divider()
+                Label(DiskDisplayPreference.text(textTemplate, volume: volume), systemImage: "textformat")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .statsCardBackground()
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Show storage details")
+    }
+
+    private func speedLabel(_ title: String, symbol: String, value: Double?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .foregroundStyle(title == "Read" ? .blue : .red)
+            Text(title).foregroundStyle(.secondary)
+            Text(DiskDisplayPreference.rate(value, base: speedBase, unit: speedUnit))
+                .fontWeight(.semibold)
+                .monospacedDigit()
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
     }
 }
 

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		127050C6354A8951F0F3AD7C /* CompanionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7494C14876FB82B53ADC99A /* CompanionSettings.swift */; };
+		1647FFDD5BA2674C2D8D16DB /* SwitchHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61579CCF746EE546F347FD0 /* SwitchHaptics.swift */; };
 		270E1F8E4720AFD8458ED04E /* NearbyMacStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B2F6D700CBD3A47795B9D6 /* NearbyMacStore.swift */; };
 		2DE09906A2261B966515BBA7 /* ActivityCore in Frameworks */ = {isa = PBXBuildFile; productRef = 703208327625265FC2C56813 /* ActivityCore */; };
 		30AC68B6676CA4C28C55EE4A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 76743439126BD5CD627001D1 /* Assets.xcassets */; };
@@ -61,6 +62,7 @@
 		B4E04B1865AC40461E74E297 /* SystemSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSampler.swift; sourceTree = "<group>"; };
 		D3B34C17E5846BE8D40AB1E0 /* DiskPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskPreferences.swift; sourceTree = "<group>"; };
 		D4B2F6D700CBD3A47795B9D6 /* NearbyMacStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyMacStore.swift; sourceTree = "<group>"; };
+		D61579CCF746EE546F347FD0 /* SwitchHaptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchHaptics.swift; sourceTree = "<group>"; };
 		E034BC406ABF473BE7713CAA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E5662887A673587B9541EA1B /* CompanionUpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionUpdateInstaller.swift; sourceTree = "<group>"; };
 		F7494C14876FB82B53ADC99A /* CompanionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettings.swift; sourceTree = "<group>"; };
@@ -106,6 +108,7 @@
 				79FB9D9AD51A36EB5C36D658 /* PasscodeEntryView.swift */,
 				25B3744C0B26CF947738AC9C /* PasscodePairer.swift */,
 				999C672436CAA34B72210905 /* StatsApp.swift */,
+				D61579CCF746EE546F347FD0 /* SwitchHaptics.swift */,
 				0C1061D927BC896513FF033C /* WelcomeFlowView.swift */,
 			);
 			name = Mobile;
@@ -297,6 +300,7 @@
 				BCFE2659D654307ECC8E8CDC /* PasscodeEntryView.swift in Sources */,
 				ABACA846D32DF7D264D45B78 /* PasscodePairer.swift in Sources */,
 				FCC462B7D3C04775D0B1962E /* StatsApp.swift in Sources */,
+				1647FFDD5BA2674C2D8D16DB /* SwitchHaptics.swift in Sources */,
 				8C78A2CBD08C57BF163349BC /* WelcomeFlowView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -311,7 +315,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stats;
@@ -321,7 +325,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.9;
+				MARKETING_VERSION = 0.3.10;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsForIOS;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
@@ -511,7 +515,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stats;
@@ -521,7 +525,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.9;
+				MARKETING_VERSION = 0.3.10;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsForIOS;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
