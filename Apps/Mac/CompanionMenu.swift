@@ -45,7 +45,7 @@ enum CompanionConnectionPresentation {
 
 struct CompanionMenu: View {
     @ObservedObject var model: StatsCompanionModel
-    @Environment(\.openSettings) private var openSettings
+    let openSettingsAction: (CompanionSettingsPage) -> Void
     @FocusState private var menuFocused: Bool
     @State private var keyboardSelection: MenuAction?
     @State private var hoveredAction: MenuAction?
@@ -415,13 +415,7 @@ struct CompanionMenu: View {
     }
 
     private func showSettings(_ page: CompanionSettingsPage) {
-        model.settingsPage = page
-        NSApp.activate(ignoringOtherApps: true)
-        openSettings()
-        DispatchQueue.main.async {
-            NSApp.windows.first(where: { $0.title.localizedCaseInsensitiveContains("Settings") })?
-                .orderFrontRegardless()
-        }
+        openSettingsAction(page)
     }
 
     private func open(_ address: String) {

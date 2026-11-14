@@ -135,9 +135,13 @@ final class StatsCompanionModel: ObservableObject {
             Task { @MainActor in self?.sampler.refreshDiskIfDue() }
         }
         updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkForUpdates(silent: true) }
+            Task { @MainActor in
+                guard Self.automaticallyChecksForUpdates else { return }
+                self?.checkForUpdates(silent: true)
+            }
         }
         DispatchQueue.main.async { [weak self] in
+            guard Self.automaticallyChecksForUpdates else { return }
             self?.checkForUpdates(silent: true)
         }
     }
@@ -281,7 +285,7 @@ final class StatsCompanionModel: ObservableObject {
                     updateCheckFailed("Update check failed (HTTP \(response.statusCode))", previous: previousState, silent: silent)
                     return
                 }
-                let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+                let current = Self.versionForUpdateCheck
                 let newer = try CompanionUpdateRelease.newest(in: data, newerThan: current)
                 if let newer {
                     updateState = .available(newer)
@@ -294,6 +298,27 @@ final class StatsCompanionModel: ObservableObject {
                 updateCheckFailed("Update check failed", previous: previousState, silent: silent)
             }
         }
+    }
+
+    private static var versionForUpdateCheck: String {
+        let installed = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        #if DEBUG
+        // Lets an Xcode run exercise both automatic and manual checks against
+        // an existing release without publishing a new one.
+        if let override = ProcessInfo.processInfo.environment["STATS_TEST_CURRENT_VERSION"],
+           !override.isEmpty {
+            return override
+        }
+        #endif
+        return installed
+    }
+
+    private static var automaticallyChecksForUpdates: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["STATS_TEST_MANUAL_UPDATE_CHECK"] != "1"
+        #else
+        return true
+        #endif
     }
 
     private func updateCheckFailed(_ message: String, previous: CompanionUpdateState, silent: Bool) {
@@ -462,16 +487,8 @@ struct StatsCompanionApp: App {
     @NSApplicationDelegateAdaptor(CompanionDockReopenDelegate.self) private var dockDelegate
     @Environment(\.openSettings) private var openSettings
     @StateObject private var model = StatsCompanionModel()
+    @State private var statusItemController = CompanionStatusItemController()
     var body: some Scene {
-        MenuBarExtra(isInserted: Binding(
-            get: { model.menuBarVisible },
-            set: { model.setMenuBarVisible($0) }
-        )) {
-            CompanionMenu(model: model)
-        } label: {
-            CompanionMenuBarLabel(model: model)
-        }
-        .menuBarExtraStyle(.window)
         companionSettingsScene
         #if DEBUG
         WindowGroup("Settings Preview") {
@@ -491,6 +508,7 @@ struct StatsCompanionApp: App {
         let openSettings = openSettings
         let dockDelegate = dockDelegate
         let model = model
+        let statusItemController = statusItemController
         // Register from App.body rather than Settings.onAppear: the Settings
         // window may never have opened before the first Dock click.
         DispatchQueue.main.async {
@@ -498,6 +516,15 @@ struct StatsCompanionApp: App {
                 model.settingsPage = .home
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
+            }
+            statusItemController.start(model: model) { page in
+                model.settingsPage = page
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
+                DispatchQueue.main.async {
+                    NSApp.windows.first(where: { $0.title.localizedCaseInsensitiveContains("Settings") })?
+                        .orderFrontRegardless()
+                }
             }
         }
         return Settings {

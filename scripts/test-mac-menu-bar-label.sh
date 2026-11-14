@@ -6,7 +6,7 @@ temp="$(mktemp -d /tmp/stats-menu-label.XXXXXX)"
 trap 'rm -rf "$temp"' EXIT
 
 xcrun swiftc -swift-version 6 \
-  "$repo/Apps/Mac/CompanionMenuBarLabel.swift" \
-  "$repo/Tests/Mac/MenuBarLabelTests.swift" \
+  "$repo/Apps/Mac/CompanionStatusItemController.swift" \
+  "$repo/Tests/Mac/StatusItemTests.swift" \
   -o "$temp/menu-label-tests"
 "$temp/menu-label-tests" "$repo/Apps/Mac/Assets.xcassets"
