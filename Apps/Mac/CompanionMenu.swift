@@ -14,7 +14,6 @@ private enum MenuAction {
     case changelog
     case openAtLogin
     case settings
-    case restart
     case quit
 }
 
@@ -87,12 +86,7 @@ struct CompanionMenu: View {
             }
             row("Settings", action: .settings, shortcut: "⌘,")
             menuDivider
-            row("Restart Stats Companion", action: .restart, symbol: "arrow.clockwise")
             row("Quit Stats Companion", action: .quit, shortcut: "⌘Q")
-            if let error = model.restartError {
-                Text(error).font(.caption).foregroundStyle(.red)
-                    .padding(.horizontal, 10).padding(.bottom, 6)
-            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -336,7 +330,7 @@ struct CompanionMenu: View {
             case .checking, .upToDate: break
             }
         }
-        result += [.website, .about, .changelog, .openAtLogin, .settings, .restart, .quit]
+        result += [.website, .about, .changelog, .openAtLogin, .settings, .quit]
         return result
     }
 
@@ -407,8 +401,6 @@ struct CompanionMenu: View {
             model.setOpenAtLogin(!model.openAtLogin)
         case .settings:
             showSettings(.home)
-        case .restart:
-            model.restartCompanion()
         case .quit:
             NSApp.terminate(nil)
         }

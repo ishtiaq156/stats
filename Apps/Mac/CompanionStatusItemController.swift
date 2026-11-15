@@ -67,7 +67,7 @@ final class CompanionStatusItemController: NSObject {
     }
 
     static func image(hasUpdate: Bool) -> NSImage {
-        let image = NSImage(size: NSSize(width: 28, height: 18), flipped: false) { _ in
+        let image = NSImage(size: NSSize(width: hasUpdate ? 28 : 18, height: 18), flipped: false) { _ in
             NSImage(named: "StatsStatusMark")?.draw(in: NSRect(x: 0, y: 0, width: 18, height: 18))
             if hasUpdate {
                 NSImage(named: "StatsUpdateAvailable")?.draw(

@@ -963,6 +963,10 @@ private struct CompanionRelease: Identifiable {
     var id: String { version }
 
     static let notes: [CompanionRelease] = [
+        .init(version: "0.3.15", date: "November 14, 2026", changes: [
+            "Keep the menu bar chart icon compact when no update is available.",
+            "Remove the standalone Restart action from the menu bar."
+        ]),
         .init(version: "0.3.14", date: "November 14, 2026", changes: [
             "Show a compact update arrow in the menu bar as soon as a new Companion version is found."
         ]),

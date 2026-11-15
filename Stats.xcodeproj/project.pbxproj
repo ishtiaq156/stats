@@ -340,7 +340,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -349,7 +349,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.14;
+				MARKETING_VERSION = 0.3.15;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Apps/Mac/StatsCompanion-Bridging-Header.h";
@@ -424,7 +424,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mac/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Stats Companion";
@@ -433,7 +433,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.14;
+				MARKETING_VERSION = 0.3.15;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsCompanion;
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = "Apps/Mac/StatsCompanion-Bridging-Header.h";

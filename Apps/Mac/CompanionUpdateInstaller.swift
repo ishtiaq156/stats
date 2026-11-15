@@ -115,16 +115,6 @@ enum CompanionUpdateInstaller {
         }
     }
 
-    static func restart() throws {
-        let current = Bundle.main.bundleURL.standardizedFileURL
-        guard current.pathExtension == "app" else {
-            throw CompanionUpdateError(message: "Could not find Stats Companion to restart.")
-        }
-        try startHelper(script: restartScript, arguments: [
-            current.path, String(ProcessInfo.processInfo.processIdentifier)
-        ])
-    }
-
     static func discard(_ update: PreparedCompanionUpdate) {
         try? FileManager.default.removeItem(at: update.directory)
     }
@@ -279,15 +269,4 @@ enum CompanionUpdateInstaller {
         exit 1
         """
 
-    private static let restartScript = """
-        app="$1"
-        pid="$2"
-        tries=0
-        while /bin/kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 300 ]; do
-            /bin/sleep 0.2
-            tries=$((tries + 1))
-        done
-        if /bin/kill -0 "$pid" 2>/dev/null; then exit 1; fi
-        /usr/bin/open -a "$app"
-        """
 }

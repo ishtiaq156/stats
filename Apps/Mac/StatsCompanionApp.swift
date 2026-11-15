@@ -68,7 +68,6 @@ final class StatsCompanionModel: ObservableObject {
     @Published private(set) var pairingLocked = false
     @Published private(set) var updateState: CompanionUpdateState = .idle
     @Published private(set) var installationState: CompanionInstallationState = .idle
-    @Published private(set) var restartError: String?
     var hasUpdateAvailable: Bool {
         if case .available = updateState { return true }
         return false
@@ -400,15 +399,6 @@ final class StatsCompanionModel: ObservableObject {
             NSWorkspace.shared.open(preparedUpdate.packageURL)
         } else {
             NSWorkspace.shared.activateFileViewerSelecting([preparedUpdate.packageURL])
-        }
-    }
-
-    func restartCompanion() {
-        do {
-            try CompanionUpdateInstaller.restart()
-            NSApp.terminate(nil)
-        } catch {
-            restartError = error.localizedDescription
         }
     }
 
