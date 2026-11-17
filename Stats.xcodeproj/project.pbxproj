@@ -14,6 +14,7 @@
 		2DE09906A2261B966515BBA7 /* ActivityCore in Frameworks */ = {isa = PBXBuildFile; productRef = 703208327625265FC2C56813 /* ActivityCore */; };
 		30AC68B6676CA4C28C55EE4A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 76743439126BD5CD627001D1 /* Assets.xcassets */; };
 		4F3BA217616D5763AD4219F3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 614A5AEDD0187672696A2703 /* Assets.xcassets */; };
+		52BE12654A34AD46570BE328 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809C01CB26B622FCADAF6401 /* DashboardView.swift */; };
 		5415066151824C2A2A897B5B /* ActivityCore in Frameworks */ = {isa = PBXBuildFile; productRef = DF8F2D678721977ED76A381C /* ActivityCore */; };
 		65D63E8B30BA504C4B26CCDA /* CompanionUnavailableHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65FB94219F41EFCEE9A26A9C /* CompanionUnavailableHelp.swift */; };
 		8BFEED78DC5B739E60040132 /* NearbyMacsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1202F64F51E6D5E68C6C62EC /* NearbyMacsView.swift */; };
@@ -51,6 +52,7 @@
 		65FB94219F41EFCEE9A26A9C /* CompanionUnavailableHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionUnavailableHelp.swift; sourceTree = "<group>"; };
 		76743439126BD5CD627001D1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79FB9D9AD51A36EB5C36D658 /* PasscodeEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasscodeEntryView.swift; sourceTree = "<group>"; };
+		809C01CB26B622FCADAF6401 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		819ED3D1C8F98C96118C1B65 /* CompanionStatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionStatusItemController.swift; sourceTree = "<group>"; };
 		82BE6DD0B9A14AA0F40074CE /* MetricDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricDetailView.swift; sourceTree = "<group>"; };
 		87773BDBD5B2F482FAA6F350 /* MetricServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricServer.swift; sourceTree = "<group>"; };
@@ -100,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				76743439126BD5CD627001D1 /* Assets.xcassets */,
+				809C01CB26B622FCADAF6401 /* DashboardView.swift */,
 				D3B34C17E5846BE8D40AB1E0 /* DiskPreferences.swift */,
 				2B7D72D933008F658AC73775 /* Info.plist */,
 				82BE6DD0B9A14AA0F40074CE /* MetricDetailView.swift */,
@@ -293,6 +296,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				52BE12654A34AD46570BE328 /* DashboardView.swift in Sources */,
 				D83B4D67376E7B7D97D18D04 /* DiskPreferences.swift in Sources */,
 				C5AB1F21DAB5548BE1F90CFD /* MetricDetailView.swift in Sources */,
 				270E1F8E4720AFD8458ED04E /* NearbyMacStore.swift in Sources */,
@@ -315,7 +319,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stats;
@@ -325,7 +329,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.15;
+				MARKETING_VERSION = 0.3.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsForIOS;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
@@ -515,7 +519,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 18;
+				CURRENT_PROJECT_VERSION = 19;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Apps/Mobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stats;
@@ -525,7 +529,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.3.15;
+				MARKETING_VERSION = 0.3.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ishtiaqsyed.StatsForIOS;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
