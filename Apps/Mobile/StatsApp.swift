@@ -107,7 +107,7 @@ private struct StatsSettingsFooter: View {
     }
 }
 
-private struct AboutThisMacView: View {
+struct AboutThisMacView: View {
     @ObservedObject var store: NearbyMacStore
     @Environment(\.dismiss) private var dismiss
 

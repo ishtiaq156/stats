@@ -4,6 +4,7 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var nearby: NearbyMacStore
     @State private var showSettings = false
+    @State private var showAbout = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DiskDisplayPreference.selectedDiskKey) private var selectedDiskID = ""
@@ -29,7 +30,10 @@ struct DashboardView: View {
                     timestamp: snapshot?.timestamp,
                     connected: nearby.selectedReachable,
                     lowStorage: storage.isLow,
-                    memoryPressure: pressure
+                    memoryPressure: pressure,
+                    isRefreshing: nearby.isRefreshingDashboard,
+                    openAbout: { showAbout = true },
+                    refresh: nearby.refreshDashboard
                 )
 
                 activityHeading(showsTrendWindow: history.count > 1)
@@ -81,6 +85,7 @@ struct DashboardView: View {
             }
         }
         .sheet(isPresented: $showSettings) { DashboardSettingsView(nearby: nearby) }
+        .sheet(isPresented: $showAbout) { AboutThisMacView(store: nearby) }
     }
 
     private var metricColumns: [GridItem] {
@@ -165,8 +170,13 @@ private struct DashboardMacCard: View {
     let connected: Bool
     let lowStorage: Bool
     let memoryPressure: DashboardMemoryPressure?
+    let isRefreshing: Bool
+    let openAbout: () -> Void
+    let refresh: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var deviceImage: UIImage?
+
+    private let warningTint = Color(red: 1, green: 0.79, blue: 0.43)
 
     private var attention: String? {
         let alerts = [lowStorage ? "Low storage" : nil,
@@ -175,37 +185,56 @@ private struct DashboardMacCard: View {
         return message.isEmpty ? nil : message
     }
 
-    private var statusTint: Color {
-        connected && attention == nil ? Color(red: 0.46, green: 0.95, blue: 0.77) :
-            Color(red: 1, green: 0.79, blue: 0.43)
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                identity
-                Spacer(minLength: 0)
-                if !dynamicTypeSize.isAccessibilitySize {
-                    device
-                }
-            }
+        ZStack(alignment: .bottomTrailing) {
+            Button(action: openAbout) {
+                HStack(spacing: 11) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        device
+                        Rectangle()
+                            .fill(.white.opacity(0.18))
+                            .frame(width: 1, height: 54)
+                            .accessibilityHidden(true)
+                    }
 
-            Divider().overlay(.white.opacity(0.18))
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    status
-                    Spacer(minLength: 0)
-                    if let timestamp { lastUpdate(timestamp) }
+                    VStack(alignment: .leading, spacing: 5) {
+                        identity
+                        if connected, let attention {
+                            Label(attention, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(warningTint)
+                        }
+                        statusRow
+                            .padding(.trailing, 36)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    status
-                    if let timestamp { lastUpdate(timestamp) }
-                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens About This Mac")
+
+            Button(action: refresh) {
+                Group {
+                    if isRefreshing {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isRefreshing)
+            .accessibilityLabel(isRefreshing ? "Refreshing dashboard" : "Refresh dashboard")
+            .padding(.trailing, 3)
+            .padding(.bottom, 4)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(.white)
         .background {
             RoundedRectangle(cornerRadius: 24)
@@ -223,10 +252,9 @@ private struct DashboardMacCard: View {
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(name)
-                .font(.title.weight(.bold))
-                .accessibilityAddTraits(.isHeader)
+                .font(.title2.weight(.bold))
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             if let about {
                 let model = [about.modelName == name ? nil : about.modelName, about.chip]
@@ -238,38 +266,43 @@ private struct DashboardMacCard: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
     }
 
     private var device: some View {
-        ZStack {
-            Circle()
-                .strokeBorder(.white.opacity(0.13), lineWidth: 1)
-            Circle()
-                .fill(.white.opacity(0.07))
-                .padding(6)
+        Group {
             if let deviceImage {
                 Image(uiImage: deviceImage)
                     .resizable()
                     .scaledToFit()
-                    .padding(7)
             } else {
                 Image(systemName: "desktopcomputer")
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(.white.opacity(0.88))
             }
         }
-        .frame(width: 70, height: 70)
+        .frame(width: 60, height: 60)
         .accessibilityHidden(true)
     }
 
+    private var statusRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                status.fixedSize()
+                Spacer(minLength: 0)
+                if let timestamp { lastUpdate(timestamp).fixedSize() }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                status
+                if let timestamp { lastUpdate(timestamp) }
+            }
+        }
+    }
+
     private var status: some View {
-        Label(
-            connected ? attention ?? "Connected" : "Reconnecting",
-            systemImage: connected && attention == nil ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
-        )
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(statusTint)
+        Label(connected ? "Connected" : "Reconnecting",
+              systemImage: connected ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(connected ? Color(red: 0.46, green: 0.95, blue: 0.77) : warningTint)
     }
 
     private func lastUpdate(_ timestamp: Date) -> some View {

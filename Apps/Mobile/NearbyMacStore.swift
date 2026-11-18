@@ -83,6 +83,7 @@ final class NearbyMacStore: ObservableObject {
     @Published private(set) var discoveryError: String?
     @Published private(set) var aboutInfo: MacAboutInfo?
     @Published private(set) var aboutError: String?
+    @Published private(set) var isRefreshingDashboard = false
     private var aboutFetchedAt: Date?
     private var aboutLastAttemptAt: Date?
     private static let aboutCacheLifetime: TimeInterval = 60 * 60
@@ -563,9 +564,17 @@ final class NearbyMacStore: ObservableObject {
         UserDefaults.standard.set(names, forKey: Self.pairedDisplayNamesKey)
     }
 
-    private func refresh() {
-        guard !discoveryPaused, !inFlight, let endpoint = selectedEndpoint, let key = selectedKey,
+    func refreshDashboard() {
+        guard sessionActive, !isRefreshingDashboard else { return }
+        refresh(manual: true)
+    }
+
+    private func refresh(manual: Bool = false) {
+        guard !discoveryPaused, let endpoint = selectedEndpoint, let key = selectedKey,
               let phoneID = selectedPhoneID else { return }
+        // An automatic request already in flight can supply the manual refresh's snapshot.
+        if manual { isRefreshingDashboard = true }
+        guard !inFlight else { return }
         inFlight = true
         let generation = selectionGeneration
         let requestID = UUID()
@@ -734,8 +743,10 @@ final class NearbyMacStore: ObservableObject {
                 self?.status = "Last update \(snapshot.timestamp.formatted(date: .omitted, time: .standard))"
                 self?.inFlight = false
                 self?.activeSnapshotConnection = nil
-                if self?.historyLoaded == false { self?.fetchHistory() }
-                self?.loadAbout()
+                let manual = self?.isRefreshingDashboard == true
+                if manual { self?.isRefreshingDashboard = false }
+                if manual || self?.historyLoaded == false { self?.fetchHistory() }
+                self?.loadAbout(force: manual)
             }
         }
     }
@@ -759,6 +770,7 @@ final class NearbyMacStore: ObservableObject {
         activeSnapshotConnection?.cancel()
         activeSnapshotConnection = nil
         inFlight = false
+        if isRefreshingDashboard { isRefreshingDashboard = false }
     }
 
     private func cancelHistoryRequest() {

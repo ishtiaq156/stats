@@ -27,8 +27,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ishtiaqsyed.StatsForIOS
-        MARKETING_VERSION: '0.3.16'
-        CURRENT_PROJECT_VERSION: 19
+        MARKETING_VERSION: '0.3.17'
+        CURRENT_PROJECT_VERSION: 20
         INFOPLIST_KEY_CFBundleDisplayName: Stats
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
