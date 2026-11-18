@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.18",
+          "buildVersion": "21",
+          "date": "2026-11-18T02:58:26Z",
+          "localizedDescription": "Stats for iPhone 0.3.18 adds interactive one-minute CPU and memory charts to the dashboard.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.27/Stats-v0.3.18-iOS.ipa",
+          "size": 2881745,
+          "sha256": "6d9931bd5cb7240a4d2a4ff995909e8e6f950fa38e3c3ceae45b483c3eff0b96",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.17",
           "buildVersion": "20",
           "date": "2026-11-18T00:25:30Z",
