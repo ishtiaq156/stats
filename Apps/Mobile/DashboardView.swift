@@ -1,5 +1,6 @@
 import ActivityCore
 import SwiftUI
+import UIKit
 
 struct DashboardView: View {
     @ObservedObject var nearby: NearbyMacStore
@@ -31,30 +32,25 @@ struct DashboardView: View {
                     connected: nearby.selectedReachable,
                     lowStorage: storage.isLow,
                     memoryPressure: pressure,
-                    isRefreshing: nearby.isRefreshingDashboard,
-                    openAbout: { showAbout = true },
-                    refresh: nearby.refreshDashboard
+                    openAbout: { showAbout = true }
                 )
 
                 activityHeading(showsTrendWindow: history.count > 1)
                     .padding(.top, 8)
 
                 LazyVGrid(columns: metricColumns, spacing: 12) {
-                    metricLink(.cpu) {
-                        DashboardTrendCard(
-                            kind: .cpu, value: MetricFormat.percent(snapshot?.cpuFraction), subtitle: "Processor load",
-                            samples: history, fraction: \.cpuFraction, footer: cpuFooter(snapshot?.cpuDetails)
-                        )
-                    }
+                    DashboardTrendCard(
+                        kind: .cpu, store: nearby, value: MetricFormat.percent(snapshot?.cpuFraction),
+                        subtitle: "Processor load", samples: history, fraction: \.cpuFraction,
+                        footer: cpuFooter(snapshot?.cpuDetails)
+                    )
 
-                    metricLink(.memory) {
-                        DashboardTrendCard(
-                            kind: .memory, value: MetricFormat.ramBytes(snapshot?.memoryUsedBytes),
-                            subtitle: snapshot?.memoryTotalBytes.map { "of \(MetricFormat.ramBytes($0)) used" } ?? "Memory used",
-                            samples: history, fraction: Self.memoryFraction,
-                            footer: pressure?.label ?? "Pressure unavailable", footerTint: pressure?.tint
-                        )
-                    }
+                    DashboardTrendCard(
+                        kind: .memory, store: nearby, value: MetricFormat.ramBytes(snapshot?.memoryUsedBytes),
+                        subtitle: snapshot?.memoryTotalBytes.map { "of \(MetricFormat.ramBytes($0)) used" } ?? "Memory used",
+                        samples: history, fraction: Self.memoryFraction,
+                        footer: pressure?.label ?? "Pressure unavailable", footerTint: pressure?.tint
+                    )
                 }
 
                 metricLink(.storage) { DashboardStorageCard(storage: storage) }
@@ -170,9 +166,7 @@ private struct DashboardMacCard: View {
     let connected: Bool
     let lowStorage: Bool
     let memoryPressure: DashboardMemoryPressure?
-    let isRefreshing: Bool
     let openAbout: () -> Void
-    let refresh: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var deviceImage: UIImage?
 
@@ -186,55 +180,34 @@ private struct DashboardMacCard: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Button(action: openAbout) {
-                HStack(spacing: 11) {
-                    if !dynamicTypeSize.isAccessibilitySize {
-                        device
-                        Rectangle()
-                            .fill(.white.opacity(0.18))
-                            .frame(width: 1, height: 54)
-                            .accessibilityHidden(true)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        identity
-                        if connected, let attention {
-                            Label(attention, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(warningTint)
-                        }
-                        statusRow
-                            .padding(.trailing, 36)
-                    }
+        Button(action: openAbout) {
+            HStack(spacing: 11) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    device
+                    Rectangle()
+                        .fill(.white.opacity(0.18))
+                        .frame(width: 1, height: 54)
+                        .accessibilityHidden(true)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
-                .contentShape(Rectangle())
-                .accessibilityElement(children: .combine)
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens About This Mac")
 
-            Button(action: refresh) {
-                Group {
-                    if isRefreshing {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 17, weight: .semibold))
+                VStack(alignment: .leading, spacing: 5) {
+                    identity
+                    if connected, let attention {
+                        Label(attention, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(warningTint)
                     }
+                    statusRow
                 }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .disabled(isRefreshing)
-            .accessibilityLabel(isRefreshing ? "Refreshing dashboard" : "Refresh dashboard")
-            .padding(.trailing, 3)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
         }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens About This Mac")
         .foregroundStyle(.white)
         .background {
             RoundedRectangle(cornerRadius: 24)
@@ -284,17 +257,22 @@ private struct DashboardMacCard: View {
         .accessibilityHidden(true)
     }
 
+    @ViewBuilder
     private var statusRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                status.fixedSize()
-                Spacer(minLength: 0)
-                if let timestamp { lastUpdate(timestamp).fixedSize() }
+        if let timestamp {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    status.fixedSize()
+                    Spacer(minLength: 0)
+                    lastUpdate(timestamp).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    status
+                    lastUpdate(timestamp)
+                }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                status
-                if let timestamp { lastUpdate(timestamp) }
-            }
+        } else {
+            status
         }
     }
 
@@ -337,6 +315,7 @@ private struct DashboardCardHeading: View {
 
 private struct DashboardTrendCard: View {
     let kind: MetricKind
+    let store: NearbyMacStore
     let value: String
     let subtitle: String
     let samples: [MetricSnapshot]
@@ -346,30 +325,35 @@ private struct DashboardTrendCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            DashboardCardHeading(kind: kind)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value)
-                    .font(.system(.title, design: .rounded, weight: .semibold))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.65)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+            NavigationLink {
+                MetricDetailView(kind: kind, store: store)
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    DashboardCardHeading(kind: kind)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(value)
+                            .font(.system(.title, design: .rounded, weight: .semibold))
+                            .monospacedDigit()
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens \(kind.title) details")
             }
+            .buttonStyle(.plain)
 
-            if samples.contains(where: { fraction($0)?.isFinite == true }) {
-                DashboardSparkline(samples: samples, fraction: fraction, tint: kind.tint)
-                    .frame(height: 36)
-                    .accessibilityHidden(true)
-            } else {
-                Text("Trend unavailable")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(minHeight: 36, alignment: .leading)
-            }
+            DashboardSparkline(kind: kind, samples: samples.map {
+                let reading = fraction($0).flatMap { $0.isFinite ? min(1, max(0, $0)) : nil }
+                return DashboardTrendSample(date: $0.timestamp, fraction: reading)
+            })
 
             if let footer {
                 HStack(spacing: 5) {
@@ -393,62 +377,239 @@ private struct DashboardTrendCard: View {
     }
 }
 
+private struct DashboardTrendSample {
+    let date: Date
+    let fraction: Double?
+}
+
 private struct DashboardSparkline: View {
     static let duration: TimeInterval = 60
-    let samples: [MetricSnapshot]
-    let fraction: (MetricSnapshot) -> Double?
-    let tint: Color
+    let kind: MetricKind
+    let samples: [DashboardTrendSample]
+
+    @AppStorage(StatsHapticPreference.enabledKey) private var hapticsEnabled = true
+    @ScaledMetric(relativeTo: .caption2) private var plotHeight = 50.0
+    @ScaledMetric(relativeTo: .caption2) private var readoutHeight = 21.0
+    @ScaledMetric(relativeTo: .caption2) private var readoutWidth = 112.0
+    @State private var selectedDate: Date?
+    @State private var heldSamples: [DashboardTrendSample]?
+    @State private var selectionFeedback = UISelectionFeedbackGenerator()
+
+    private var chartSamples: [DashboardTrendSample] { heldSamples ?? samples }
+    private var readings: [DashboardTrendSample] { chartSamples.filter { $0.fraction != nil } }
+    private var selected: DashboardTrendSample? { readings.first { $0.date == selectedDate } }
+    private var title: String { kind == .memory ? "Memory usage" : "CPU load" }
+
+    private var upperBound: Double {
+        guard kind == .cpu else { return 1 }
+        let peak = readings.compactMap(\.fraction).max() ?? 0
+        return [0.10, 0.20, 0.50, 1].first { $0 >= peak } ?? 1
+    }
 
     var body: some View {
-        Canvas { context, size in
-            let baseline = size.height - 2
-            var grid = Path()
-            for y in [2, size.height / 2, baseline] {
-                grid.move(to: CGPoint(x: 0, y: y))
-                grid.addLine(to: CGPoint(x: size.width, y: y))
-            }
-            context.stroke(grid, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
+        if let end = chartSamples.last?.date, let latest = readings.last {
+            let ceiling = upperBound
+            HStack(alignment: .bottom, spacing: 5) {
+                VStack(spacing: 2) {
+                    GeometryReader { geometry in
+                        if let selected {
+                            let width = geometry.size.width
+                            let bubbleWidth = min(width, readoutWidth)
+                            let x = min(width - bubbleWidth / 2,
+                                        max(bubbleWidth / 2, position(of: selected.date, end: end, width: width)))
+                            Text(readout(selected))
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .padding(.horizontal, 4)
+                                .frame(width: bubbleWidth, height: readoutHeight)
+                                .background(.regularMaterial, in: Capsule())
+                                .position(x: x, y: readoutHeight / 2)
+                        } else {
+                            Text(title)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .frame(height: readoutHeight)
+                        }
+                    }
+                    .frame(height: readoutHeight)
 
-            guard let end = samples.last?.timestamp else { return }
-            var previous: Date?
-            var segment: [CGPoint] = []
-            func drawSegment() {
-                guard let first = segment.first, let last = segment.last else { return }
-                if segment.count > 1 {
-                    var line = Path()
-                    line.move(to: first)
-                    line.addLines(segment)
-                    var area = line
-                    area.addLine(to: CGPoint(x: last.x, y: baseline))
-                    area.addLine(to: CGPoint(x: first.x, y: baseline))
-                    area.closeSubpath()
-                    context.fill(area, with: .linearGradient(
-                        Gradient(colors: [tint.opacity(0.32), tint.opacity(0.04)]),
-                        startPoint: .zero, endPoint: CGPoint(x: 0, y: baseline)))
-                    context.stroke(line, with: .color(tint), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    Canvas { context, size in
+                        drawChart(context, size: size, end: end, ceiling: ceiling)
+                    }
+                    .frame(height: plotHeight)
+                    .overlay {
+                        DashboardChartPan { x, width in
+                            inspect(at: x, width: width, end: end)
+                        } onEnd: {
+                            selectedDate = nil
+                            heldSamples = nil
+                        }
+                    }
                 }
-                if previous == end || segment.count == 1 {
-                    let dot = Path(ellipseIn: CGRect(x: last.x - 2, y: last.y - 2, width: 4, height: 4))
-                    context.fill(dot, with: .color(tint))
+
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(MetricFormat.percent(ceiling))
+                    Spacer(minLength: 0)
+                    Text(MetricFormat.percent(ceiling / 2))
+                    Spacer(minLength: 0)
+                    Text("0%")
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(height: plotHeight)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title), one-minute chart")
+            .accessibilityValue(readout(selected ?? latest))
+            .accessibilityAdjustableAction { direction in
+                let index = readings.firstIndex { $0.date == selectedDate } ?? readings.count - 1
+                switch direction {
+                case .increment: select(readings[min(index + 1, readings.count - 1)].date)
+                case .decrement: select(readings[max(index - 1, 0)].date)
+                @unknown default: break
                 }
             }
-            for sample in samples {
-                if let previous, sample.timestamp.timeIntervalSince(previous) > 6 {
-                    drawSegment()
-                    segment.removeAll(keepingCapacity: true)
-                }
-                guard let value = fraction(sample), value.isFinite else {
-                    drawSegment()
-                    segment.removeAll(keepingCapacity: true)
-                    previous = nil
-                    continue
-                }
-                let elapsedFraction = 1 + sample.timestamp.timeIntervalSince(end) / Self.duration
-                segment.append(CGPoint(x: 2 + elapsedFraction * (size.width - 4),
-                                       y: baseline - min(1, max(0, value)) * (baseline - 2)))
-                previous = sample.timestamp
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption2.weight(.medium))
+                Text("Trend unavailable").font(.caption)
             }
-            drawSegment()
+            .foregroundStyle(.secondary)
+            .frame(minHeight: readoutHeight + 2 + plotHeight, alignment: .topLeading)
+        }
+    }
+
+    private func readout(_ sample: DashboardTrendSample) -> String {
+        "\(sample.date.formatted(date: .omitted, time: .shortened)) · \(MetricFormat.percent(sample.fraction))"
+    }
+
+    private func select(_ date: Date) {
+        guard date != selectedDate else { return }
+        selectedDate = date
+        if hapticsEnabled { selectionFeedback.selectionChanged() }
+    }
+
+    private func inspect(at x: CGFloat, width: CGFloat, end: Date) {
+        guard width > 4 else { return }
+        if heldSamples == nil {
+            heldSamples = samples
+            if hapticsEnabled { selectionFeedback.prepare() }
+        }
+        let progress = min(1, max(0, (x - 2) / (width - 4)))
+        let target = end.addingTimeInterval((progress - 1) * Self.duration)
+        if let nearest = readings.min(by: {
+            abs($0.date.timeIntervalSince(target)) < abs($1.date.timeIntervalSince(target))
+        }) {
+            select(nearest.date)
+        }
+    }
+
+    private func position(of date: Date, end: Date, width: CGFloat) -> CGFloat {
+        2 + (1 + date.timeIntervalSince(end) / Self.duration) * max(0, width - 4)
+    }
+
+    private func drawChart(_ context: GraphicsContext, size: CGSize, end: Date, ceiling: Double) {
+        let top = 5.0
+        let baseline = size.height - 5
+        let tint = kind.tint
+        var grid = Path()
+        for y in [top, size.height / 2, baseline] {
+            grid.move(to: CGPoint(x: 0, y: y))
+            grid.addLine(to: CGPoint(x: size.width, y: y))
+        }
+        context.stroke(grid, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
+
+        func point(_ sample: DashboardTrendSample, fraction: Double) -> CGPoint {
+            CGPoint(x: position(of: sample.date, end: end, width: size.width),
+                    y: baseline - (fraction / ceiling) * (baseline - top))
+        }
+
+        var previous: Date?
+        var segment: [CGPoint] = []
+        func flushSegment() {
+            guard let first = segment.first, let last = segment.last else { return }
+            if segment.count > 1 {
+                let line = Path { $0.addLines(segment) }
+                var area = line
+                area.addLine(to: CGPoint(x: last.x, y: baseline))
+                area.addLine(to: CGPoint(x: first.x, y: baseline))
+                area.closeSubpath()
+                context.fill(area, with: .linearGradient(
+                    Gradient(colors: [tint.opacity(0.32), tint.opacity(0.04)]),
+                    startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: baseline)))
+                context.stroke(line, with: .color(tint), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            }
+            if previous == end || segment.count == 1 {
+                context.fill(Path(ellipseIn: CGRect(x: last.x - 2, y: last.y - 2, width: 4, height: 4)), with: .color(tint))
+            }
+            segment.removeAll(keepingCapacity: true)
+        }
+
+        for sample in chartSamples {
+            if let previous, sample.date.timeIntervalSince(previous) > 6 { flushSegment() }
+            guard let fraction = sample.fraction else {
+                flushSegment()
+                previous = nil
+                continue
+            }
+            segment.append(point(sample, fraction: fraction))
+            previous = sample.date
+        }
+        flushSegment()
+
+        if let selected, let fraction = selected.fraction {
+            let location = point(selected, fraction: fraction)
+            var cursor = Path()
+            cursor.move(to: CGPoint(x: location.x, y: 0))
+            cursor.addLine(to: CGPoint(x: location.x, y: baseline))
+            context.stroke(cursor, with: .color(tint.opacity(0.8)), lineWidth: 1)
+            let dot = Path(ellipseIn: CGRect(x: location.x - 4, y: location.y - 4, width: 8, height: 8))
+            context.fill(dot, with: .color(tint))
+            context.stroke(dot, with: .color(Color(uiColor: .secondarySystemGroupedBackground)), lineWidth: 1.5)
+        }
+    }
+}
+
+/// A horizontal pan can begin on the plot while vertical swipes go to the dashboard scroll view.
+private struct DashboardChartPan: UIViewRepresentable {
+    let onChange: (CGFloat, CGFloat) -> Void
+    let onEnd: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.chart = self
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var chart: DashboardChartPan
+
+        init(_ chart: DashboardChartPan) { self.chart = chart }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
+
+        @objc func pan(_ pan: UIPanGestureRecognizer) {
+            guard let view = pan.view else { return }
+            switch pan.state {
+            case .began, .changed: chart.onChange(pan.location(in: view).x, view.bounds.width)
+            case .ended, .cancelled, .failed: chart.onEnd()
+            default: break
+            }
         }
     }
 }
