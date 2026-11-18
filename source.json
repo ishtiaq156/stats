@@ -14,6 +14,16 @@
       "category": "utilities",
       "versions": [
         {
+          "version": "0.3.17",
+          "buildVersion": "20",
+          "date": "2026-11-18T00:25:30Z",
+          "localizedDescription": "Stats for iPhone 0.3.17 makes the Mac device card more compact and adds a manual refresh.",
+          "downloadURL": "https://github.com/ishtiaq156/stats/releases/download/v0.3.26/Stats-v0.3.17-iOS.ipa",
+          "size": 2861581,
+          "sha256": "f9b77cb1a4a1cdeca6df54993992eb7906e4b4fa0d7cc6fe38f34c3b1ea1e688",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.3.16",
           "buildVersion": "19",
           "date": "2026-11-17T23:55:32Z",
